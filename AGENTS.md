@@ -41,7 +41,7 @@ Before calling work done: `cargo build` and `cargo test` must pass without error
 | `src/system/` | Windows wrappers and the background service thread (`services.rs`) |
 | `src/shell/` | Install, identity package, autostart, tray, settings, storage, error log |
 | `packaging/` | Manifest (`crest.exe.manifest`), icon (`crest.ico`), identity package, update and logo scripts |
-| `.github/workflows/` | `test.yml` (tests + build), `release.yml` (release) |
+| `.github/workflows/` | `test.yml` (tests, clippy, release build on Blacksmith runners), `release.yml` (release, GitHub-hosted) |
 
 ## Code rules
 

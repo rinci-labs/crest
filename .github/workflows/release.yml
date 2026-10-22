@@ -1,6 +1,8 @@
 # Automatic release when a version tag is pushed, e.g. `git tag v1.0.0 && git push origin v1.0.0`.
 # crest.exe is built here from the code in this repo (not uploaded from a personal computer), then
 # given a build provenance attestation that anyone can check with `gh attestation verify`.
+# Deliberately stays on a GitHub-hosted runner with no cache: the build provenance then points at
+# GitHub's own runner image, and nothing from earlier runs can end up in a released crest.exe.
 name: Release
 
 on:
