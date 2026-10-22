@@ -14,6 +14,8 @@ permissions:
   id-token: write
   attestations: write
   artifact-metadata: write
+  # SignPath reads this run's job details to check where crest.exe was built.
+  actions: read
 
 jobs:
   release:
@@ -25,21 +27,57 @@ jobs:
       - name: Install Rust (version from rust-toolchain.toml)
         run: rustup toolchain install
       - name: Check tag matches the Cargo.toml version
+        id: version
         shell: pwsh
         run: |
           $version = (cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages[0].version
           if ("v$version" -ne $env:GITHUB_REF_NAME) {
             throw "Tag $env:GITHUB_REF_NAME does not match the Cargo.toml version ($version)"
           }
+          "version=$version" >> $env:GITHUB_OUTPUT
       - name: Test
         run: cargo test --locked
       - name: Build
         run: cargo build --release --locked
+      # Code signing through SignPath Foundation (free for open source). Turns on once the
+      # SIGNPATH_ORGANIZATION_ID variable and SIGNPATH_API_TOKEN secret are set in the repo; until
+      # then releases ship unsigned. SignPath only signs when every job before it ran on a
+      # GitHub-hosted runner, which is another reason this workflow stays off Blacksmith.
+      - name: Upload unsigned crest.exe for signing
+        id: unsigned
+        if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: crest-unsigned
+          path: target/release/crest.exe
+          if-no-files-found: error
+      - name: Sign crest.exe (SignPath)
+        if: ${{ steps.unsigned.outcome == 'success' }}
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'crest' }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG || 'release-signing' }}
+          github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
+          # A team member approves each request in SignPath; give them time.
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: signed
+          parameters: |
+            version: "${{ steps.version.outputs.version }}"
       - name: Prepare release files
         shell: pwsh
+        env:
+          SIGNED: ${{ steps.unsigned.outcome == 'success' }}
         run: |
           New-Item -ItemType Directory dist | Out-Null
-          Copy-Item target/release/crest.exe dist/crest.exe
+          if ($env:SIGNED -eq "true") {
+            $signature = Get-AuthenticodeSignature signed/crest.exe
+            if ($signature.Status -ne "Valid") { throw "signed/crest.exe signature: $($signature.Status)" }
+            Copy-Item signed/crest.exe dist/crest.exe
+          } else {
+            Copy-Item target/release/crest.exe dist/crest.exe
+          }
           Compress-Archive -Path dist/crest.exe, LICENSE -DestinationPath "dist/Crest-$env:GITHUB_REF_NAME.zip"
           Get-ChildItem dist | Get-FileHash -Algorithm SHA256 |
             ForEach-Object { "$($_.Hash.ToLower())  $(Split-Path $_.Path -Leaf)" } |
@@ -58,21 +96,29 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PRIVATE_REPO: ${{ github.event.repository.private }}
+          SIGNED: ${{ steps.unsigned.outcome == 'success' }}
         run: |
           $repo = $env:GITHUB_REPOSITORY
           $attestation = ""
           if ($env:PRIVATE_REPO -ne "true") {
             $attestation = "`n- Proof that the files were built by GitHub Actions from the code in this repo: ``gh attestation verify crest.exe -R $repo``"
           }
+          $warning = "Windows may show *`"Windows protected your PC`"* because Crest doesn't have a code signing certificate yet. Click **More info → Run anyway**."
+          $signing = ""
+          if ($env:SIGNED -eq "true") {
+            $warning = "A new release can still show *`"Windows protected your PC`"* for a while, until Windows SmartScreen has seen enough downloads of it. Click **More info → Run anyway**."
+            $signing = "`n## Code signing policy`n`nFree code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org). See the [code signing policy](https://github.com/$repo#code-signing-policy).`n"
+          }
           $notes = @"
           ## How to install
 
           1. Download **crest.exe** below and open it.
-          2. Windows may show *"Windows protected your PC"* because Crest doesn't have a paid code signing certificate. Click **More info → Run anyway**.
+          2. $warning
           3. Choose **Yes** to install. No administrator rights are needed, and you can uninstall it anytime from Settings > Apps.
 
           ## Verify the files
 
           - The SHA-256 of each file is in ``SHA256SUMS.txt``.$attestation
+          $signing
           "@
           gh release create $env:GITHUB_REF_NAME dist/* --title "Crest $env:GITHUB_REF_NAME" --notes $notes --verify-tag

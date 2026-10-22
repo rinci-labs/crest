@@ -141,6 +141,25 @@ Both live under `%APPDATA%\Crest` and each has an entry in the tray menu:
 - Report vulnerabilities privately through *Security → Report a vulnerability*. See
   [SECURITY.md](SECURITY.md).
 
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by
+[SignPath Foundation](https://signpath.org).
+
+Only `crest.exe` built by the [release workflow](.github/workflows/release.yml) from this
+repository is signed, on a GitHub-hosted runner, and only after a team member approves the request.
+
+| Role | Members |
+|---|---|
+| Committers and reviewers | [@rafaalrazzak](https://github.com/rafaalrazzak) |
+| Approvers | [@rafaalrazzak](https://github.com/rafaalrazzak) |
+
+Every pull request from outside the team is reviewed by a team member before it is merged. All
+team members use multi-factor authentication for GitHub and SignPath.
+
+Privacy: Crest sends no data to other networked systems unless the user turns on a feature that
+does so. See [Privacy](#privacy) for each one.
+
 ## Build
 
 Requires [Rust](https://rustup.rs) (version pinned in `rust-toolchain.toml`) and Visual Studio
