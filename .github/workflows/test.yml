@@ -1,0 +1,24 @@
+# Test and build on every push to main and every pull request.
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Install Rust (version from rust-toolchain.toml)
+        run: rustup toolchain install
+      - name: Test
+        run: cargo test --locked
+      - name: Release build
+        run: cargo build --release --locked

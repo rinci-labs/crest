@@ -1,0 +1,91 @@
+[package]
+name = "crest"
+version = "0.1.0"
+edition = "2024"
+description = "A top-of-screen panel for Windows: music, quick notices, a file shelf, and small widgets"
+license = "MIT"
+publish = false
+
+# Only official Microsoft crates from the windows-rs repo. The small crates below already come
+# in as dependencies of `windows`; they are listed here only so their types can be used.
+[dependencies]
+# Vector2 and Matrix3x2 for Direct2D.
+windows-numerics = "0.3.1"
+# IIterable and IMapView for WinRT APIs.
+windows-collections = "0.3.2"
+# Used by the #[implement] macro for COM callbacks (volume, audio devices).
+windows-core = "0.62.2"
+# Completion handlers for WinRT async operations (notification access).
+windows-future = "0.3.2"
+
+[dependencies.windows]
+version = "0.62.2"
+features = [
+    "ApplicationModel",
+    "ApplicationModel_DataTransfer",
+    "Data_Json",
+    "Devices_Enumeration",
+    "Foundation",
+    "Foundation_Collections",
+    "Graphics_Imaging",
+    "Management_Deployment",
+    "Media_Control",
+    "Networking_Connectivity",
+    "Storage",
+    "Storage_Search",
+    "UI_Notifications",
+    "UI_Notifications_Management",
+    "Storage_Streams",
+    "Web_Http",
+    "Web_Http_Headers",
+    "Wdk_Graphics_Direct3D",
+    "Win32_Foundation",
+    "Win32_Graphics_Direct2D",
+    "Win32_Graphics_Direct2D_Common",
+    "Win32_Graphics_DirectWrite",
+    "Win32_Graphics_Dwm",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Graphics_Gdi",
+    "Win32_Media_Audio",
+    "Win32_Media_Audio_Endpoints",
+    "Win32_Media_MediaFoundation",
+    "Win32_Networking_WinHttp",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_NetworkManagement_Ndis",
+    "Win32_Security",
+    "Win32_Security_Cryptography",
+    "Win32_Storage_FileSystem",
+    "Win32_Storage_Packaging_Appx",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_IO",
+    # Process list for agents that keep no pid file (Codex).
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_DataExchange",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Memory",
+    "Win32_System_Ole",
+    "Win32_System_Performance",
+    "Win32_System_Power",
+    "Win32_System_Registry",
+    "Win32_System_Rpc",
+    "Win32_System_RemoteDesktop",
+    "Win32_System_SystemInformation",
+    "Win32_System_SystemServices",
+    "Win32_System_Threading",
+    "Win32_System_Time",
+    "Win32_System_Variant",
+    "Win32_System_Wmi",
+    "Win32_UI_Accessibility",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Input",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+]
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

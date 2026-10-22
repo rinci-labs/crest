@@ -1,0 +1,69 @@
+# Automatic release when a version tag is pushed, e.g. `git tag v1.0.0 && git push origin v1.0.0`.
+# crest.exe is built here from the code in this repo (not uploaded from a personal computer), then
+# given a build provenance attestation that anyone can check with `gh attestation verify`.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+  artifact-metadata: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Install Rust (version from rust-toolchain.toml)
+        run: rustup toolchain install
+      - name: Check tag matches the Cargo.toml version
+        shell: pwsh
+        run: |
+          $version = (cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages[0].version
+          if ("v$version" -ne $env:GITHUB_REF_NAME) {
+            throw "Tag $env:GITHUB_REF_NAME does not match the Cargo.toml version ($version)"
+          }
+      - name: Test
+        run: cargo test --locked
+      - name: Build
+        run: cargo build --release --locked
+      - name: Prepare release files
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory dist | Out-Null
+          Copy-Item target/release/crest.exe dist/crest.exe
+          Compress-Archive -Path dist/crest.exe, LICENSE -DestinationPath "dist/Crest-$env:GITHUB_REF_NAME.zip"
+          Get-ChildItem dist | Get-FileHash -Algorithm SHA256 |
+            ForEach-Object { "$($_.Hash.ToLower())  $(Split-Path $_.Path -Leaf)" } |
+            Set-Content dist/SHA256SUMS.txt -Encoding ascii
+      - name: Attest build provenance
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            dist/crest.exe
+            dist/Crest-*.zip
+      - name: Publish release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $repo = $env:GITHUB_REPOSITORY
+          $notes = @"
+          ## How to install
+
+          1. Download **crest.exe** below and open it.
+          2. Windows may show *"Windows protected your PC"* because Crest doesn't have a paid code signing certificate. Click **More info → Run anyway**.
+          3. Choose **Yes** to install. No administrator rights are needed, and you can uninstall it anytime from Settings > Apps.
+
+          ## Verify the files
+
+          - The SHA-256 of each file is in ``SHA256SUMS.txt``.
+          - Proof that the files were built by GitHub Actions from the code in this repo: ``gh attestation verify crest.exe -R $repo``
+          "@
+          gh release create $env:GITHUB_REF_NAME dist/* --title "Crest $env:GITHUB_REF_NAME" --notes $notes --verify-tag

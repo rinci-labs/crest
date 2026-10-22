@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  "Sparse" package: it holds only the manifest and logos. crest.exe stays in the install folder
+  (external location) and runs as a regular desktop app, just with package identity. Windows
+  requires that identity to read notifications (WhatsApp, etc.).
+  Crest builds and signs this package itself when incoming messages are turned on
+  (src/identity.rs); its version follows the Crest version.
+
+  Requested capabilities:
+  - userNotificationListener: read notifications; the user still has to allow it once.
+  - runFullTrust: run like a regular desktop app (not a UWP sandbox).
+  - unvirtualizedResources: settings stay in %APPDATA%\Crest and autostart stays in the
+    regular registry, instead of being redirected to the package folder.
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
+  xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
+  xmlns:desktop6="http://schemas.microsoft.com/appx/manifest/desktop/windows10/6"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap uap3 uap10 desktop6 rescap">
+
+  <Identity Name="Crest" Publisher="CN=Crest Local" Version="0.5.0.0" ProcessorArchitecture="x64" />
+
+  <Properties>
+    <DisplayName>Crest</DisplayName>
+    <PublisherDisplayName>Rinci Labs</PublisherDisplayName>
+    <Logo>assets\StoreLogo.png</Logo>
+    <uap10:AllowExternalContent>true</uap10:AllowExternalContent>
+    <desktop6:RegistryWriteVirtualization>disabled</desktop6:RegistryWriteVirtualization>
+    <desktop6:FileSystemWriteVirtualization>disabled</desktop6:FileSystemWriteVirtualization>
+  </Properties>
+
+  <Resources>
+    <Resource Language="en-us" />
+  </Resources>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+    <rescap:Capability Name="unvirtualizedResources" />
+    <uap3:Capability Name="userNotificationListener" />
+  </Capabilities>
+
+  <Applications>
+    <Application Id="App" Executable="crest.exe" uap10:TrustLevel="mediumIL" uap10:RuntimeBehavior="win32App">
+      <uap:VisualElements
+        AppListEntry="none"
+        DisplayName="Crest"
+        Description="A top-of-screen panel for Windows"
+        BackgroundColor="transparent"
+        Square150x150Logo="assets\Square150x150Logo.png"
+        Square44x44Logo="assets\Square44x44Logo.png" />
+    </Application>
+  </Applications>
+</Package>

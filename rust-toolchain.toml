@@ -1,0 +1,6 @@
+# The Rust version used to build Crest, both locally and on GitHub Actions, so release builds
+# always come from the same compiler.
+[toolchain]
+channel = "1.99.1"
+profile = "minimal"
+components = ["clippy"]
