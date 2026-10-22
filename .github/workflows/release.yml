@@ -44,7 +44,10 @@ jobs:
           Get-ChildItem dist | Get-FileHash -Algorithm SHA256 |
             ForEach-Object { "$($_.Hash.ToLower())  $(Split-Path $_.Path -Leaf)" } |
             Set-Content dist/SHA256SUMS.txt -Encoding ascii
+      # GitHub only stores attestations for public repos on the free plan, so this is skipped while
+      # the repo is private and turns on by itself once it is public.
       - name: Attest build provenance
+        if: ${{ !github.event.repository.private }}
         uses: actions/attest@v4
         with:
           subject-path: |
@@ -54,8 +57,13 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          PRIVATE_REPO: ${{ github.event.repository.private }}
         run: |
           $repo = $env:GITHUB_REPOSITORY
+          $attestation = ""
+          if ($env:PRIVATE_REPO -ne "true") {
+            $attestation = "`n- Proof that the files were built by GitHub Actions from the code in this repo: ``gh attestation verify crest.exe -R $repo``"
+          }
           $notes = @"
           ## How to install
 
@@ -65,7 +73,6 @@ jobs:
 
           ## Verify the files
 
-          - The SHA-256 of each file is in ``SHA256SUMS.txt``.
-          - Proof that the files were built by GitHub Actions from the code in this repo: ``gh attestation verify crest.exe -R $repo``
+          - The SHA-256 of each file is in ``SHA256SUMS.txt``.$attestation
           "@
           gh release create $env:GITHUB_REF_NAME dist/* --title "Crest $env:GITHUB_REF_NAME" --notes $notes --verify-tag
