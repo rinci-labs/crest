@@ -36,7 +36,7 @@ Before calling work done: `cargo build` and `cargo test` must pass without error
 | `src/ui/tokens.rs` | Design tokens: spacing, radii, type sizes, opacity, motion |
 | `src/ui/motion.rs` | Spring animation |
 | `src/ui/tests.rs` | Renderer tests and `target/preview` images |
-| `src/tools/` | Page logic: agenda, focus, shelf, tasks, timer, water; `Page`/`Pages` in `mod.rs` |
+| `src/tools/` | Page logic: agenda, clipboard, focus, shelf, tasks, timer, water; `Page`/`Pages` in `mod.rs` |
 | `src/feeds/` | Media sessions, lyrics, weather, incoming messages, Google, plugins, Tako; `agents/` has one reader per coding agent, shared `util.rs`, and the folder `listener.rs` |
 | `src/system/` | Windows wrappers and the background service thread (`services.rs`) |
 | `src/shell/` | Install, identity package, autostart, tray, settings, storage, error log |

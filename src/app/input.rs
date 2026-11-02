@@ -248,6 +248,9 @@ impl App {
                 ids.into_iter().for_each(|id| self.fade_tile(id));
             }
             Hit::ShelfRemove(id) => self.fade_tile(id),
+            Hit::ClipCopy(id) => self.copy_clip(id),
+            Hit::ClipRemove(id) => self.clips.remove(id),
+            Hit::ClipClear => self.clips.clear(),
             Hit::FocusToggle => {
                 self.focus.toggle(now);
                 self.schedule_focus();
@@ -456,6 +459,7 @@ impl App {
             }
             Hit::ShelfItem(_)
             | Hit::ShelfStrip
+            | Hit::ClipList
             | Hit::TaskList
             | Hit::VolumeSlider
             | Hit::BrightnessSlider
@@ -514,6 +518,9 @@ impl App {
                 if !horizontal && self.shelf.items.len() > shelf::VISIBLE =>
             {
                 self.shelf.scroll_by(step)
+            }
+            Some(Hit::ClipList | Hit::ClipCopy(_) | Hit::ClipRemove(_)) if !horizontal && self.clips.items.len() > crate::tools::clipboard::VISIBLE => {
+                self.clips.scroll_by(step)
             }
             Some(Hit::TaskList | Hit::TaskToggle(_) | Hit::TaskRemove(_) | Hit::TaskTop(_))
                 if !horizontal && self.tasks.items.len() > tasks::VISIBLE =>

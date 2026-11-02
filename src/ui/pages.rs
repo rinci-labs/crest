@@ -4,6 +4,7 @@
 use super::*;
 use crate::feeds::agents::{State as AgentState, until};
 use crate::system::stats::{gigabytes, rate};
+use crate::tools::clipboard::VISIBLE as CLIPS_VISIBLE;
 use crate::tools::shelf::VISIBLE as SHELF_VISIBLE;
 use crate::tools::tasks::VISIBLE as TASKS_VISIBLE;
 use crate::tools::prayer;
@@ -468,6 +469,7 @@ impl Renderer {
             Page::Home => self.home_page(s, x0, x1, a, dx, dy),
             Page::Controls => self.controls_page(s, x0, x1, a),
             Page::Shelf => self.shelf_page(s, x0, x1, a),
+            Page::Clipboard => self.clipboard_page(s, x0, x1, a),
             Page::Focus => self.focus_page(s, x0, x1, a),
             Page::Timer => self.timer_page(s, x0, x1, a),
             Page::Water => self.water_page(s, x0, x1, a),
@@ -1706,6 +1708,53 @@ impl Renderer {
         (area, y1, y2)
     }
 
+    /// Clipboard history: one row per copied text (its first line, "+N" for more lines), newest
+    /// first. A click copies the row again; the × on hover forgets it.
+    fn clipboard_page(&self, s: &Scene, x0: f32, x1: f32, a: f32) {
+        let p = &self.pal;
+        let (l, r) = (x0 + MARGIN, x1 - MARGIN);
+        let clips = s.clips;
+        let (right, right_hit) = if clips.items.is_empty() { ("", None) } else { ("Clear all", Some(Hit::ClipClear)) };
+        self.header(s, Header { right, right_hit }, x1, a);
+
+        self.hit(rect(l - 6.0, tokens::DECK_TOP, r + 6.0, 124.0), Hit::ClipList);
+        if clips.items.is_empty() {
+            self.empty_state(rect(l, EMPTY_AREA.0, r, EMPTY_AREA.1), Some(ICON_CLIPBOARD), "Nothing copied yet", "Text you copy shows up here", a);
+            return;
+        }
+        for (row, clip) in clips.items.iter().skip(clips.scroll).take(CLIPS_VISIBLE).enumerate() {
+            let y = TASKS_TOP + row as f32 * ROW_H;
+            let hovered = matches!(s.hovered, Some(Hit::ClipCopy(id) | Hit::ClipRemove(id)) if id == clip.id);
+            self.list_row(rect(l - 6.0, y - 11.0, r + 6.0, y + 11.0), tokens::RADIUS_ROW, hovered, a);
+            // While hovered the row's right end holds the × instead of the line count.
+            let mut text_r = r - if hovered { 26.0 } else { 0.0 };
+            let more = clip.more_lines();
+            if more > 0 && !hovered {
+                let count = format!("+{more}");
+                let width = self.text_width(&count, &self.fonts.caption_end);
+                self.text(&count, &self.fonts.caption_end, rect(r - width - 2.0, y - 8.0, r, y + 8.0), p.muted, a);
+                text_r -= width + 10.0;
+            }
+            self.text(clip.preview(), &self.fonts.body, rect(l, y - 10.0, text_r, y + 10.0), p.text, a);
+            self.hit(rect(l - 6.0, y - 11.0, r - 20.0, y + 11.0), Hit::ClipCopy(clip.id));
+            if hovered {
+                let over = s.hovered == Some(Hit::ClipRemove(clip.id));
+                self.icon_button(r - 8.0, y, 10.0, over, a);
+                self.glyph(ICON_CLOSE, &self.fonts.icon_9, r - 8.0, y, if over { RED } else { p.muted }, a);
+                self.hit(rect(r - 19.0, y - 11.0, r + 6.0, y + 11.0), Hit::ClipRemove(clip.id));
+            }
+        }
+        // Markers for more rows above/below; scrolled with the mouse wheel.
+        if clips.scroll > 0 {
+            self.glyph(ICON_CHEVRON_UP, &self.fonts.icon_9, (l + r) / 2.0, TASKS_TOP - 17.0, p.muted, a);
+        }
+        if clips.items.len() > clips.scroll + CLIPS_VISIBLE {
+            self.glyph(ICON_CHEVRON_DOWN, &self.fonts.icon_9, (l + r) / 2.0, 121.0, p.muted, a);
+        }
+        let hint = "Click to copy again · cleared when Crest closes";
+        self.text(hint, &self.fonts.caption_center, rect(l, ROW_Y - 8.0, r, ROW_Y + 8.0), p.muted, a);
+    }
+
     fn tasks_page(&self, s: &Scene, x0: f32, x1: f32, a: f32) {
         let p = &self.pal;
         let (l, r) = (x0 + MARGIN, x1 - MARGIN);
@@ -2858,6 +2907,7 @@ fn page_icon(page: Page) -> Option<char> {
         Page::Home => Some(ICON_HOME),
         Page::Controls => Some(ICON_VOLUME[3]),
         Page::Shelf => Some(ICON_FOLDER),
+        Page::Clipboard => Some(ICON_CLIPBOARD),
         Page::Focus => Some(ICON_STOPWATCH),
         Page::Timer => Some(ICON_TIMER),
         Page::Water => None,
@@ -2886,6 +2936,7 @@ fn label(page: Page) -> &'static str {
         Page::Home => "Home",
         Page::Controls => "Audio",
         Page::Shelf => "Shelf",
+        Page::Clipboard => "Clips",
         Page::Focus => "Focus",
         Page::Timer => "Timer",
         Page::Water => "Water",

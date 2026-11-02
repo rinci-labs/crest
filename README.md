@@ -43,7 +43,8 @@ its own.
   Song share, Poll, Timer, and VIP queue. Paste any overlay link from the Tako dashboard; Crest
   only reads, so OBS still plays everything. Off by default.
 - **Pages**: Home (clock or music, plus calendar and agenda), Quick controls (volume, brightness,
-  microphone, quiet mode), Shelf (drop files on Crest, or on the Share zone), Focus, Timer, Water,
+  microphone, quiet mode), Shelf (drop files on Crest, or on the Share zone),
+  Clipboard (recent copied text, click to copy again; memory only), Focus, Timer, Water,
   Prayer (today's prayer times and a notice before each azan, calculated on this PC),
   Tasks, System (CPU, GPU, RAM, disk, network), Agents, Mail, Plugins, and Tako.
 - **Look**: spring motion, a mascot that glances and reacts, six themes (Ink, Slate, Ocean, Ember,
@@ -205,7 +206,7 @@ cargo clippy --all-targets
 | `src/main.rs` | Entry point: CLI commands, DPI awareness, single-instance guard |
 | `src/app/` | The window and its state, split by concern: `input`, `events`, `schedule`, `frame` (motion and drawing), `views`, `hud`, `mascot`, `playback`, `files`, `commands`, `config` |
 | `src/ui/` | Direct2D renderer (`mod.rs`), page layouts (`pages.rs`), design tokens (`tokens.rs`), spring motion (`motion.rs`), and render tests |
-| `src/tools/` | Page logic and data: agenda, focus, shelf, tasks, timer, water, page order, and iCal feeds (`feeds.rs`, `calfeed.rs`) |
+| `src/tools/` | Page logic and data: agenda, clipboard, focus, shelf, tasks, timer, water, page order, and iCal feeds (`feeds.rs`, `calfeed.rs`) |
 | `src/feeds/` | Outside data: media sessions, lyrics, weather, messages, Google mail and calendar (`google.rs`), plugins (`plugins.rs`), coding agents (`agents/`) |
 | `src/system/` | Windows wrappers: audio, brightness, power, Bluetooth, network, privacy, stats, desktop, drag and drop, thumbnails, sounds, share, clock, HTTP, watch, service thread, `datetime.rs`, `secrets.rs` |
 | `src/shell/` | Install, package identity, autostart, tray, settings, storage, and the error log |
