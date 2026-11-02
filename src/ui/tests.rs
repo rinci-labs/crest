@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use super::*;
+use crate::tools::clipboard::Clips;
 use crate::tools::shelf::Shelf;
 use crate::tools::tasks::Tasks;
 use crate::feeds::agents::{Kind as AgentKind, Limits, Meter, State as AgentState};
@@ -12,6 +13,7 @@ const SAMPLE_NOW: u64 = 1_800_000_000;
 struct Sample {
     media: MediaView,
     shelf: Shelf,
+    clips: Clips,
     tasks: Tasks,
     focus: FocusView,
     water: WaterView,
@@ -60,6 +62,12 @@ fn agent(id: &str, kind: AgentKind, title: &str, project: &str, state: AgentStat
 fn sample() -> Sample {
     let mut shelf = Shelf::default();
     shelf.add(["Project", "Corporate and Campaign.png", "Infuse Navy Tote Bag.png"].map(|n| PathBuf::from(format!("C:\\sample\\{n}"))));
+    let mut clips = Clips::default();
+    for text in ["npm run build -- --watch", "https://example.com/a/long/link/to/a/shared/doc?id=4821", "fn main() {
+    println!(\"hi\");
+}", "Meeting moved to 3 pm"] {
+        clips.push(text.to_string());
+    }
     let mut tasks = Tasks::default();
     for text in ["Send the design revision to the client", "Buy coffee", "Tidy up the Downloads folder that is completely full"] {
         tasks.add(text);
@@ -81,6 +89,7 @@ fn sample() -> Sample {
             accent: Some(0x4FC3F7),
         },
         shelf,
+        clips,
         tasks,
         focus: FocusView {
             phase: Phase::Focus,
@@ -566,6 +575,7 @@ fn preview_states() {
         State { theme: Theme::Paper, media: true, lyrics_button: Some(true), lyrics: Some(&lyrics), lyric_mix: 1.0, ..State::new("player_lyrics_paper", View::PanelWide, Page::Home) },
         State { media: true, battery: Some((64, true)), ..State::new("player_charging", View::Panel, Page::Home) },
         State { hovered: Some(Hit::ShelfItem(2)), ..State::new("page_shelf", View::Panel, Page::Shelf) },
+        State { hovered: Some(Hit::ClipCopy(3)), ..State::new("page_clipboard", View::Panel, Page::Clipboard) },
         State { hovered: Some(Hit::FocusReset), ..State::new("page_focus", View::Panel, Page::Focus) },
         State { hovered: Some(Hit::WaterDrink), ..State::new("page_water", View::Panel, Page::Water) },
         State { hovered: Some(Hit::TaskToggle(0)), ..State::new("page_tasks", View::Panel, Page::Tasks) },
@@ -723,6 +733,7 @@ fn preview_states() {
             page_from: None,
             shelf: &data.shelf,
             shelf_fx: state.fx.unwrap_or(&no_fx),
+        clips: &data.clips,
             tasks: &data.tasks,
             focus: if state.name.starts_with("mood") || state.name == "size_small" { &idle } else { &data.focus },
             water: &data.water,
@@ -835,6 +846,7 @@ fn scene_for<'a>(data: &'a Sample, view: View, page: Page, media: bool) -> Scene
         page_from: None,
         shelf: &data.shelf,
         shelf_fx: &data.shelf_fx,
+        clips: &data.clips,
         tasks: &data.tasks,
         focus: &data.focus,
         water: &data.water,

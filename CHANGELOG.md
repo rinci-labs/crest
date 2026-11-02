@@ -7,6 +7,9 @@ and versions follow [Semantic Versioning](https://semver.org).
 
 ### Added
 
+- Clipboard page: the last 30 texts copied anywhere, newest first; a click copies one again.
+  Kept in memory only (never written to disk), skips copies that password managers mark as
+  private, and records nothing while the page is hidden.
 - Update notices, opt-in: Settings > About shows the version and a "Check for updates" switch.
   Once a day Crest asks GitHub for the latest release; a newer one shows a notice once, and its
   View button (or Settings > About) opens the release page. Nothing is downloaded automatically.

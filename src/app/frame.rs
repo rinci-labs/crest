@@ -493,6 +493,7 @@ impl App {
                 .map(|(from, start, dir)| (from, ((now - start) / PAGE_ANIM_SECS).clamp(0.0, 1.0) as f32, dir)),
             shelf: &self.shelf,
             shelf_fx: &shelf_fx,
+            clips: &self.clips,
             tasks: &self.tasks,
             focus: &focus,
             water: &water,

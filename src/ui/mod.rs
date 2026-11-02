@@ -64,6 +64,7 @@ use crate::system::stats::Stats;
 use crate::system::thumbnail::Thumbnail;
 use crate::tools::{Page, Pages};
 use crate::tools::focus::Phase;
+use crate::tools::clipboard::Clips;
 use crate::tools::shelf::Shelf;
 use crate::tools::tasks::Tasks;
 
@@ -274,6 +275,12 @@ pub enum Hit {
     ShelfItem(u64),
     ShelfRemove(u64),
     ShelfClear,
+    /// Background of the clipboard list (for the mouse wheel).
+    ClipList,
+    /// Copy a kept text again.
+    ClipCopy(u64),
+    ClipRemove(u64),
+    ClipClear,
     FocusToggle,
     FocusReset,
     FocusPhase(Phase),
@@ -388,6 +395,7 @@ impl Hit {
         !matches!(
             self,
             Hit::ShelfStrip
+                | Hit::ClipList
                 | Hit::TaskList
                 | Hit::CalendarStrip
                 | Hit::AgendaList
@@ -900,6 +908,8 @@ pub struct Scene<'a> {
     pub page_from: Option<(Page, f32, f32)>,
     pub shelf: &'a Shelf,
     pub shelf_fx: &'a ShelfFx,
+    /// Texts copied lately, newest first.
+    pub clips: &'a Clips,
     pub tasks: &'a Tasks,
     pub focus: &'a FocusView,
     pub water: &'a WaterView,
@@ -1126,6 +1136,7 @@ const ICON_PHONE: char = '\u{E8EA}';
 const ICON_MUSIC: char = '\u{EC4F}';
 const ICON_FOLDER: char = '\u{E8B7}';
 const ICON_VIDEO: char = '\u{E714}';
+const ICON_CLIPBOARD: char = '\u{E77F}';
 const ICON_DOCUMENT: char = '\u{E8A5}';
 const ICON_STOPWATCH: char = '\u{E916}';
 const ICON_REFRESH: char = '\u{E72C}';
