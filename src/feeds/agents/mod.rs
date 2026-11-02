@@ -13,6 +13,7 @@ mod codex;
 mod copilot;
 mod cursor;
 mod hooks;
+mod limits;
 mod listener;
 mod omp;
 mod util;
@@ -20,6 +21,9 @@ mod window;
 
 use std::path::PathBuf;
 
+#[cfg(test)]
+pub use limits::Meter;
+pub use limits::{Limits, relay as statusline, until};
 pub use listener::Listener;
 pub use window::focus;
 pub use hooks::{install as install_hooks, install_provider, installed_hooks, record as record_hook};
@@ -88,7 +92,7 @@ const DETAIL_MAX: usize = 40;
 /// Rows kept after sorting.
 const MAX_ROWS: usize = 12;
 /// Rows that fit on the Agents page at once; the rest scroll with the mouse wheel.
-pub const VISIBLE: usize = 2;
+pub const VISIBLE: usize = 3;
 /// Session records are tiny; anything bigger is not one.
 const MAX_JSON: u64 = 16 * 1024;
 /// A finished session reads as "Done" for this long, then "Idle".
@@ -214,10 +218,16 @@ pub fn changes(before: &[Session], after: &[Session]) -> Vec<Change> {
         .collect()
 }
 
+/// Plan limits change slowly; they are reread at most this often (in seconds).
+const LIMITS_EVERY: u64 = 10;
+
 /// Rescans every reader and remembers the last rows.
 #[derive(Default)]
 struct Scanner {
     last: Option<Vec<Session>>,
+    limits: Option<Vec<Limits>>,
+    /// When the limits were last read (Unix seconds).
+    limits_read: u64,
 }
 
 impl Scanner {
@@ -234,6 +244,21 @@ impl Scanner {
         }
         self.last = Some(rows.clone());
         Some(rows)
+    }
+
+    /// Fresh plan limits, or `None` when unchanged or read too recently.
+    fn scan_limits(&mut self) -> Option<Vec<Limits>> {
+        let now = util::now();
+        if self.limits.is_some() && now.saturating_sub(self.limits_read) < LIMITS_EVERY {
+            return None;
+        }
+        self.limits_read = now;
+        let limits = home().map(|home| limits::read(&home, now)).unwrap_or_default();
+        if self.limits.as_ref() == Some(&limits) {
+            return None;
+        }
+        self.limits = Some(limits.clone());
+        Some(limits)
     }
 }
 

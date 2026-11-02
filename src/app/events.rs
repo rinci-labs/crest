@@ -95,6 +95,7 @@ impl App {
                 }
                 Event::Privacy(usage) => self.on_privacy(usage),
                 Event::Agents(rows) => self.on_agents(rows),
+                Event::AgentLimits(limits) => self.on_agent_limits(limits),
                 Event::System(stats) => self.system = Some(stats),
                 Event::Volume { level, muted, initial } => {
                     self.volume = Some((level, muted));
@@ -152,6 +153,7 @@ impl App {
                 Event::Google(result) => self.on_google(result),
                 Event::Plugin(name, output) => self.on_plugin(name, output),
                 Event::Calendar(fetched) => self.on_calendar(fetched),
+                Event::Tako(update) => self.on_tako(update),
                 Event::Thumbnail(thumb) => {
                     if self.shelf.get(thumb.id).is_some() {
                         self.renderer.set_thumbnail(&thumb);
@@ -293,9 +295,11 @@ impl App {
             self.agent_listener = agents.then(|| agents::Listener::start(self.services.notifier())).flatten();
             if !agents {
                 self.agent_rows.clear();
+                self.rebuild_agent_list();
                 self.agents_seen = false;
             }
         }
+        self.sync_tako();
     }
 
     /// Laptop lock/unlock. Crest stays on the lock screen, but only with the clock and music.
@@ -335,8 +339,6 @@ impl App {
         }
     }
 
-    /// Reread agent sessions. `force` scans even when the page is closed (used by the refresh
-    /// button); periodic scans only run while the Agents page is open.
     /// New agent rows from the listener: raise a notice for a change, then show the rows.
     pub(super) fn on_agents(&mut self, rows: Vec<agents::Session>) {
         if self.agents_seen && self.settings.agent_notices {
@@ -360,8 +362,31 @@ impl App {
         }
         self.agents_seen = true;
         self.agent_rows = rows;
-        self.agent_scroll = self.agent_scroll.min(self.agent_rows.len().saturating_sub(agents::VISIBLE));
+        self.rebuild_agent_list();
         if self.expanded && self.page == Page::Agents && !self.animating() {
+            self.redraw();
+        }
+    }
+
+    /// The Agents page's rows from the scan: dismissed ones left out, then the filter. A
+    /// dismissed row comes back once it works again.
+    pub(super) fn rebuild_agent_list(&mut self) {
+        let rows = &self.agent_rows;
+        self.agent_dismissed.retain(|id| rows.iter().any(|row| &row.id == id && matches!(row.state, agents::State::Done | agents::State::Idle)));
+        let shown: Vec<&agents::Session> = rows.iter().filter(|row| !self.agent_dismissed.contains(&row.id)).collect();
+        self.agent_counts = ui::AgentFilter::ALL.map(|filter| shown.iter().filter(|row| filter.keeps(row.state)).count());
+        self.agent_list = shown.into_iter().filter(|row| self.agent_filter.keeps(row.state)).cloned().collect();
+        if self.agent_open.as_ref().is_some_and(|id| !self.agent_list.iter().any(|row| &row.id == id)) {
+            self.agent_open = None;
+        }
+        self.agent_scroll = self.agent_scroll.min(self.agent_list.len().saturating_sub(agents::VISIBLE));
+    }
+
+    /// New plan limits from the listener: shown on the Agents page and, when close to the
+    /// limit, as a chip on Home.
+    pub(super) fn on_agent_limits(&mut self, limits: Vec<agents::Limits>) {
+        self.agent_limits = limits;
+        if self.expanded && matches!(self.page, Page::Agents | Page::Home) && !self.animating() {
             self.redraw();
         }
     }

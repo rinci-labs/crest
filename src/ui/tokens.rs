@@ -66,6 +66,10 @@ pub const FILL_GHOST: f32 = 0.045;
 pub const FILL_SOFT: f32 = 0.12;
 /// Background of the active choice.
 pub const FILL_STRONG: f32 = 0.16;
+/// Opacity of a button that cannot be used yet (a Connect with nothing valid to connect).
+pub const DISABLED: f32 = 0.4;
+/// Plate over a click target while the mouse button is held on it.
+pub const FILL_PRESS: f32 = 0.10;
 /// Track of progress bars and rings.
 pub const TRACK: f32 = 0.22;
 /// Column divider line.

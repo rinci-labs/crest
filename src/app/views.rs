@@ -136,6 +136,7 @@ impl App {
     pub(super) fn rebuild_views(&mut self) {
         self.mail_view = self.build_mail();
         self.plugins_view = self.build_plugins();
+        self.tako_view = self.build_tako();
     }
 
     /// Unread mail, or the reason the page has none.

@@ -46,10 +46,14 @@ const ID_GOOGLE_CONNECT: usize = 24;
 const ID_GOOGLE_DISCONNECT: usize = 25;
 const ID_PLUGINS_FOLDER: usize = 26;
 const ID_FEEDS_FILE: usize = 27;
+const ID_TAKO: usize = 28;
+const ID_TAKO_DISCONNECT: usize = 29;
 /// Consecutive choices starting at these ids.
 const ID_MESSAGES: usize = 50;
 const ID_PAGES: usize = 60;
-const ID_SIZE: usize = 70;
+const ID_SIZE: usize = 80;
+// One id per page before the sizes start: overlapping ranges would turn a page into a size.
+const _: () = assert!(ID_PAGES + Page::ALL.len() <= ID_SIZE);
 const ID_THEME: usize = 100;
 const ID_PRAYER_METHOD: usize = 120;
 const ID_PRAYER_MADHAB: usize = 130;
@@ -85,6 +89,16 @@ pub enum Command {
     ToggleGoogleCalendar,
     /// Run the commands in the plugins folder while the Plugins page is open.
     TogglePlugins,
+    /// Donations from the Tako overlay.
+    ToggleTako,
+    /// Forget the Tako overlay key.
+    TakoDisconnect,
+    /// Open the Tako page (to paste the overlay link).
+    TakoOpen,
+    /// Which Tako donations become notices, and whether they show the message.
+    ToggleTakoAlerts,
+    ToggleTakoSounds,
+    ToggleTakoMessages,
     /// Start the browser sign-in for Google.
     GoogleConnect,
     GoogleDisconnect,
@@ -238,9 +252,13 @@ pub fn show_menu(hwnd: HWND, state: MenuState) -> Option<Command> {
         item(options, check(s.mail), ID_MAIL, "Mail (uses the internet)");
         item(options, check(s.google_calendar), ID_GOOGLE_CALENDAR, "Google Calendar events (uses the internet)");
         item(options, check(s.plugins), ID_PLUGINS, "Plugins");
+        item(options, check(s.tako), ID_TAKO, "Tako donations (uses the internet)");
         let google = if crate::feeds::google::connected() { "Google: Disconnect" } else { "Google: Connect…" };
         item(options, MF_UNCHECKED, if crate::feeds::google::connected() { ID_GOOGLE_DISCONNECT } else { ID_GOOGLE_CONNECT }, google);
         item(options, MF_UNCHECKED, ID_PLUGINS_FOLDER, "Open plugins folder");
+        if crate::feeds::tako::key().is_some() {
+            item(options, MF_UNCHECKED, ID_TAKO_DISCONNECT, "Tako: Disconnect");
+        }
         item(options, MF_UNCHECKED, ID_FEEDS_FILE, "Calendar feeds (calendars.txt)…");
         // Submenus are destroyed together with their parent menu.
         let _ = AppendMenuW(options, MF_POPUP, messages.0 as usize, w!("Incoming messages"));
@@ -305,6 +323,8 @@ pub fn show_menu(hwnd: HWND, state: MenuState) -> Option<Command> {
             ID_MAIL => Some(Command::ToggleMail),
             ID_GOOGLE_CALENDAR => Some(Command::ToggleGoogleCalendar),
             ID_PLUGINS => Some(Command::TogglePlugins),
+            ID_TAKO => Some(Command::ToggleTako),
+            ID_TAKO_DISCONNECT => Some(Command::TakoDisconnect),
             ID_GOOGLE_CONNECT => Some(Command::GoogleConnect),
             ID_GOOGLE_DISCONNECT => Some(Command::GoogleDisconnect),
             ID_PLUGINS_FOLDER => Some(Command::PluginsFolder),

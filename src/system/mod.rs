@@ -9,6 +9,7 @@ pub mod desktop;
 pub mod dnd;
 pub mod http;
 pub mod network;
+pub mod player;
 pub mod power;
 pub mod privacy;
 pub mod secrets;

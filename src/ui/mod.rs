@@ -75,8 +75,10 @@ pub enum View {
     Pill,
     /// Wide pill showing the lyric line currently being sung.
     LyricPill,
-    /// Short notice: volume, power, Bluetooth, focus, water, privacy.
+    /// Short one-line notice: volume, power, focus, water, privacy.
     Hud,
+    /// Two-line notice with room for an action: messages, mail, Tako, agents, downloads.
+    Card,
     /// Compact notice: the shape widens sideways at pill height (volume,
     /// brightness, Caps/Num Lock, charger).
     Strip,
@@ -84,9 +86,25 @@ pub enum View {
     Panel,
     /// Wide Home: music/clock on the left, calendar on the right.
     PanelWide,
-    /// Taller panel for Settings, so its groups get room to breathe instead of being packed
-    /// into the page height every other page uses.
+    /// Larger panel for Settings: wide enough for its section sidebar beside the rows, and tall
+    /// enough for four rows under a section title.
     PanelTall,
+    /// The Tako player: a 16:9 video slot inside the island, the video docked over it.
+    Player,
+}
+
+/// The player shape: its width, the video slot's top and side inset (DIP), and the slot's corner.
+const PLAYER_W: f32 = 600.0;
+const PLAYER_SLOT_TOP: f32 = 38.0;
+const PLAYER_SIDE: f32 = 16.0;
+pub const PLAYER_RADIUS: f32 = tokens::RADIUS_CARD;
+
+/// The video slot of a player shape `width` DIP wide, in canvas coordinates (the canvas is
+/// centred on the shape, so `x` runs from `CANVAS.0 / 2 - width / 2`).
+pub fn player_slot(width: f32) -> D2D_RECT_F {
+    let x0 = CANVAS.0 / 2.0 - width / 2.0;
+    let (l, r) = (x0 + PLAYER_SIDE, x0 + width - PLAYER_SIDE);
+    rect(l, PLAYER_SLOT_TOP, r, PLAYER_SLOT_TOP + (r - l) * 9.0 / 16.0)
 }
 
 /// Number of contents that can fade in/out; the order matches [`View::content`].
@@ -99,16 +117,18 @@ impl View {
             View::Pill => (176.0, 30.0),
             View::LyricPill => (360.0, 30.0),
             View::Hud => (320.0, 42.0),
+            View::Card => (400.0, 58.0),
             View::Strip => (300.0, 30.0),
             View::Panel => (440.0, tokens::PANEL_H),
             View::PanelWide => (660.0, tokens::PANEL_H),
-            View::PanelTall => (440.0, tokens::PANEL_H + 48.0),
+            View::PanelTall => (560.0, tokens::PANEL_H + 64.0),
+            View::Player => (PLAYER_W, PLAYER_SLOT_TOP + (PLAYER_W - 2.0 * PLAYER_SIDE) * 9.0 / 16.0 + PLAYER_SIDE),
         }
     }
 
     /// Open panel, normal or wide.
     pub const fn is_panel(self) -> bool {
-        matches!(self, View::Panel | View::PanelWide | View::PanelTall)
+        matches!(self, View::Panel | View::PanelWide | View::PanelTall | View::Player)
     }
 
     /// Index of the content shown in this shape; the thin line holds nothing.
@@ -117,8 +137,8 @@ impl View {
             View::Slim => None,
             View::Pill => Some(0),
             View::LyricPill => Some(1),
-            View::Hud | View::Strip => Some(2),
-            View::Panel | View::PanelWide | View::PanelTall => Some(3),
+            View::Hud | View::Card | View::Strip => Some(2),
+            View::Panel | View::PanelWide | View::PanelTall | View::Player => Some(3),
         }
     }
 }
@@ -153,6 +173,40 @@ pub enum Hud {
     Mail { from: String, subject: String, initials: String, more: usize },
     /// Prayer `name` at `time` ("15:12") is `ahead` minutes away; 0 = the azan is now.
     Prayer { name: &'static str, time: String, ahead: u32 },
+    /// A Tako donation: who, what ("Rp 10.000"), the line under it (the message, a media
+    /// share's video, or a soundboard sound), and the video to open when clicked.
+    Tako { name: String, value: String, line: String, initials: String, url: String },
+}
+
+impl Hud {
+    /// Drawn as a two-line card (`View::Card`) rather than the one-line notice.
+    pub fn card(&self) -> bool {
+        matches!(
+            self,
+            Hud::Bluetooth { .. }
+                | Hud::Message { .. }
+                | Hud::Mail { .. }
+                | Hud::Tako { .. }
+                | Hud::Screenshot { .. }
+                | Hud::Download { .. }
+                | Hud::Wifi { .. }
+                | Hud::Agenda { .. }
+                | Hud::Prayer { .. }
+                | Hud::Agent { .. }
+        )
+    }
+
+    /// What clicking the notice does, shown as its button; none when a click only opens a page.
+    pub fn action(&self) -> Option<&'static str> {
+        match self {
+            Hud::Message { .. } | Hud::Mail { .. } => Some("Open"),
+            Hud::Tako { url, .. } if !url.is_empty() => Some("Play"),
+            Hud::Download { .. } => Some("Show"),
+            Hud::Screenshot { .. } => Some("View"),
+            Hud::Agent { needs_input: true, pid, .. } => Some(if *pid != 0 { "Switch" } else { "View" }),
+            _ => None,
+        }
+    }
 }
 
 /// Mascot expression.
@@ -215,6 +269,8 @@ pub enum Hit {
     TaskList,
     TaskToggle(usize),
     TaskRemove(usize),
+    /// Move an open task to the top of the list.
+    TaskTop(usize),
     TaskInput,
     TasksClearDone,
     /// Volume and brightness sliders (the value comes from the click position, see [`Renderer::slider_value`]).
@@ -253,10 +309,16 @@ pub enum Hit {
     AgentFolder(usize),
     /// Background of the agent list (for the mouse wheel).
     AgentList,
+    /// The plan usage meters on the Agents page; hovering shows when each window resets.
+    AgentLimits,
     /// Rescan the plugin folder.
     PluginsReload,
     /// Open the plugin folder in Explorer.
     PluginsFolder,
+    /// The Paste button inside an empty setup box.
+    Paste(PasteTarget),
+    /// Write the commented example plugin into the folder.
+    PluginsExample,
     /// Background of the plugin list (for the mouse wheel).
     PluginList,
     /// One plugin row; opens its URL when it has one.
@@ -274,8 +336,30 @@ pub enum Hit {
     MailRow(usize),
     /// One agent row, by index into [`Scene::agents`]: click switches to its window.
     AgentRow(usize),
+    /// Bring an open agent row's window forward.
+    AgentSwitch(usize),
+    /// Hide a finished agent row until it works again.
+    AgentDismiss(usize),
+    /// A filter key above the agent rows.
+    AgentFilter(AgentFilter),
     /// Focus | Timer switch on the shared timer tab.
     TimerMode(Page),
+    /// Connect the pasted Tako overlay link.
+    TakoConnect,
+    /// The overlay link box on the Tako page.
+    TakoKey,
+    /// Forget the Tako overlay key.
+    TakoDisconnect,
+    /// A section in the Tako page's sidebar.
+    TakoSection(TakoSection),
+    /// Stop the player and close it.
+    PlayerClose,
+    /// Open the playing video in the browser instead.
+    PlayerBrowser,
+    /// A row on the Tako page with a link (a media share or a song), by its index in the section.
+    TakoRow(usize),
+    /// A section in the Settings sidebar.
+    SettingsSection(SettingsSection),
     /// A switch on the settings page; handled exactly like the same tray menu choice.
     Command(Command),
 }
@@ -320,8 +404,15 @@ pub struct LyricsView {
     pub lines: [String; 5],
     /// Scroll to the new line, 0..1 (1 = settled).
     pub scroll: f32,
-    /// Placeholder text instead of lyrics, e.g. "Searching for lyrics…".
-    pub status: Option<&'static str>,
+    /// Why there are no lines yet, instead of lyrics.
+    pub status: Option<LyricStatus>,
+}
+
+/// The lyrics column without lines: still looking, or there are none for this track.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum LyricStatus {
+    Searching,
+    Missing,
 }
 
 pub struct FocusView {
@@ -461,6 +552,235 @@ pub struct PluginsView {
     pub empty: bool,
 }
 
+/// A section of the Settings page, chosen in its sidebar.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum SettingsSection {
+    /// Theme, size, sounds, and compact indicators.
+    #[default]
+    Look,
+    /// The switches for each feature.
+    Features,
+    /// Prayer time method, Asr school, and reminder.
+    Prayer,
+    /// Agent notices and hooks.
+    Agents,
+    /// The Tako connection and which donations become notices.
+    Tako,
+}
+
+impl SettingsSection {
+    pub const ALL: [SettingsSection; 5] = [
+        SettingsSection::Look,
+        SettingsSection::Features,
+        SettingsSection::Prayer,
+        SettingsSection::Agents,
+        SettingsSection::Tako,
+    ];
+
+    /// Name in the sidebar.
+    pub fn label(self) -> &'static str {
+        match self {
+            SettingsSection::Look => "Appearance",
+            SettingsSection::Features => "Features",
+            SettingsSection::Prayer => "Prayer",
+            SettingsSection::Agents => "Agents",
+            SettingsSection::Tako => "Tako",
+        }
+    }
+
+    /// Title over the section's rows.
+    fn title(self) -> &'static str {
+        match self {
+            SettingsSection::Look => "Appearance",
+            SettingsSection::Features => "Features",
+            SettingsSection::Prayer => "Prayer times",
+            SettingsSection::Agents => "Coding agents",
+            SettingsSection::Tako => "Tako",
+        }
+    }
+
+    /// One line under the title saying what the section covers.
+    fn about(self) -> &'static str {
+        match self {
+            SettingsSection::Look => "Theme, size, and how notices behave",
+            SettingsSection::Features => "The globe marks features that use the internet",
+            SettingsSection::Prayer => "Calculated on this PC for your city",
+            SettingsSection::Agents => "Notices and hooks for coding agents",
+            SettingsSection::Tako => "Donations from your overlay, read-only",
+        }
+    }
+
+    fn icon(self) -> char {
+        match self {
+            SettingsSection::Look => ICON_BRIGHTNESS,
+            SettingsSection::Features => ICON_PLUGIN,
+            SettingsSection::Prayer => ICON_PRAYER,
+            SettingsSection::Agents => ICON_TERMINAL,
+            SettingsSection::Tako => ICON_HEART,
+        }
+    }
+}
+
+/// A setup box that takes the clipboard with its Paste button.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+pub enum PasteTarget {
+    GoogleId,
+    GoogleSecret,
+    TakoLink,
+}
+
+/// Which sessions the Agents page lists.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Hash)]
+pub enum AgentFilter {
+    #[default]
+    All,
+    Waiting,
+    Working,
+    Done,
+}
+
+impl AgentFilter {
+    pub const ALL: [AgentFilter; 4] = [AgentFilter::All, AgentFilter::Waiting, AgentFilter::Working, AgentFilter::Done];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            AgentFilter::All => "All",
+            AgentFilter::Waiting => "Waiting",
+            AgentFilter::Working => "Working",
+            AgentFilter::Done => "Done",
+        }
+    }
+
+    /// A session in `state` is listed under this filter.
+    pub fn keeps(self, state: agents::State) -> bool {
+        match self {
+            AgentFilter::All => true,
+            AgentFilter::Waiting => state == agents::State::Waiting,
+            AgentFilter::Working => state == agents::State::Running,
+            AgentFilter::Done => matches!(state, agents::State::Done | agents::State::Idle),
+        }
+    }
+}
+
+/// What the player shape shows around the video.
+#[derive(Clone, Default)]
+pub struct PlayerView {
+    /// Who sent it ("Budi").
+    pub name: String,
+    /// The video line ("YouTube · title").
+    pub line: String,
+    /// The video is docked over the slot; until then the slot says it is loading.
+    pub ready: bool,
+}
+
+/// A section of the Tako page, chosen in its sidebar; one per overlay Crest reads.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum TakoSection {
+    /// Donations, media shares, and soundboard sounds since Crest connected.
+    #[default]
+    Recent,
+    /// The leaderboard overlay.
+    Top,
+    /// The milestone overlay.
+    Goal,
+    /// The song share queue.
+    Songs,
+    /// The polling overlay.
+    Poll,
+    /// The timer overlay.
+    Timer,
+    /// The VIP queue.
+    Vip,
+}
+
+impl TakoSection {
+    pub const ALL: [TakoSection; 7] = [
+        TakoSection::Recent,
+        TakoSection::Top,
+        TakoSection::Goal,
+        TakoSection::Songs,
+        TakoSection::Poll,
+        TakoSection::Timer,
+        TakoSection::Vip,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            TakoSection::Recent => "Recent",
+            TakoSection::Top => "Leaderboard",
+            TakoSection::Goal => "Milestone",
+            TakoSection::Songs => "Song share",
+            TakoSection::Poll => "Poll",
+            TakoSection::Timer => "Timer",
+            TakoSection::Vip => "VIP queue",
+        }
+    }
+
+    fn icon(self) -> char {
+        match self {
+            TakoSection::Recent => ICON_HEART,
+            TakoSection::Top => ICON_STAR,
+            TakoSection::Goal => ICON_FLAG,
+            TakoSection::Songs => ICON_MUSIC,
+            TakoSection::Poll => ICON_LIST,
+            TakoSection::Timer => ICON_TIMER,
+            TakoSection::Vip => ICON_PEOPLE,
+        }
+    }
+}
+
+/// The Tako page, built when its data changes.
+#[derive(Clone, Default)]
+pub struct TakoView {
+    /// No key yet: the page is the setup sheet.
+    pub setup: bool,
+    /// Text of the link box, and whether it is being typed into.
+    pub link: String,
+    pub editing: bool,
+    /// Caption: "Live", "Connecting…", or the problem.
+    pub status: String,
+    /// Subscribed: donations arrive as they happen (green dot).
+    pub live: bool,
+    /// Offline or the key was refused (orange dot).
+    pub failing: bool,
+    /// Shown on the setup sheet instead of the hint, e.g. a link without a key.
+    pub problem: Option<String>,
+    pub section: TakoSection,
+    /// Latest donations, newest first.
+    pub gifts: Vec<TakoRow>,
+    /// Leaderboard: name and amount text.
+    pub board: Vec<(String, String)>,
+    pub goal: Option<TakoGoal>,
+    /// Song share queue, in play order.
+    pub songs: Vec<TakoRow>,
+    /// Poll options: name, amount text, share 0..1.
+    pub poll: Vec<(String, String, f32)>,
+    /// Countdown: the big line ("12 min left") and the one under it.
+    pub timer: Option<(String, String)>,
+    /// VIP queue entries.
+    pub vips: Vec<TakoRow>,
+}
+
+/// One two-line row on the Tako page: a donation, a song, or a VIP entry.
+#[derive(Clone, Default)]
+pub struct TakoRow {
+    pub name: String,
+    /// Right of the name: the amount, or a song's length.
+    pub value: String,
+    pub message: String,
+    pub initials: String,
+    /// Opened when the row is clicked (a media share's video, a song); empty for none.
+    pub url: String,
+}
+
+#[derive(Clone)]
+pub struct TakoGoal {
+    pub title: String,
+    pub current: String,
+    pub target: String,
+    pub fraction: f32,
+}
+
 /// One calendar entry on Home, from the agenda or a subscribed feed.
 pub struct CalendarEntry {
     /// Agenda id for a typed entry; `None` for a feed event, which is read-only.
@@ -513,6 +833,10 @@ pub struct Scene<'a> {
     pub height: f32,
     /// Opacity of each content: pill, lyric pill, HUD, panel.
     pub alpha: [f32; CONTENTS],
+    /// The size each content is laid out at: the shape it belongs to, not the shape's size this
+    /// frame. While the shape springs, content keeps its layout and the shape only clips it, so
+    /// text and buttons never squeeze together or reflow mid-animation.
+    pub layout: [(f32, f32); CONTENTS],
     pub eyes: Eyes,
     /// Strength of the shadow under the shape, 0..1 (full when open, faint when hovered).
     pub shadow: f32,
@@ -568,16 +892,34 @@ pub struct Scene<'a> {
     pub agenda_draft: Option<&'a str>,
     /// Running coding agent sessions, most recent activity first.
     pub agents: &'a [Session],
+    /// The Agents page's rows: not dismissed, and kept by the filter.
+    pub agent_list: &'a [Session],
+    /// Sessions per filter key, in `AgentFilter::ALL` order.
+    pub agent_counts: [usize; 4],
+    pub agent_filter: AgentFilter,
+    /// The open row, by its index in `agent_list`.
+    pub agent_open: Option<usize>,
     pub agent_hooks: agents::HookStatus,
+    /// Plan usage limits, tightest first (see [`agents::Limits`]).
+    pub agent_limits: &'a [agents::Limits],
+    /// Wall-clock time in Unix seconds, for reset countdowns.
+    pub unix: u64,
     pub mail: &'a MailView,
     pub plugins: &'a PluginsView,
+    pub tako: &'a TakoView,
+    /// The player, while a video plays: drawn instead of the page when the shape is `Player`.
+    pub player: Option<&'a PlayerView>,
     /// First agent row shown.
     pub agent_scroll: usize,
     /// The panel holds the first-run welcome instead of a page.
     pub welcome: bool,
     /// Current settings, for the settings page.
     pub settings: Settings,
+    /// Section open on the settings page.
+    pub settings_section: SettingsSection,
     pub hovered: Option<Hit>,
+    /// The click target under a held mouse button: it darkens until the button is released.
+    pub pressed: Option<Hit>,
     /// Running seconds, for the music wave animation.
     pub seconds: f64,
     /// How far the hovered element's highlight has faded in, 0..1 (see `Renderer::hover`).
@@ -704,7 +1046,9 @@ const LYRIC_SIDES: f32 = 84.0;
 /// Window canvas: fits the largest shape and the overshoot when the spring bounces.
 const CANVAS: (f32, f32) = {
     let (w, _) = View::PanelWide.size();
-    let (_, h) = View::PanelTall.size();
+    let (_, tall) = View::PanelTall.size();
+    let (_, player) = View::Player.size();
+    let h = if player > tall { player } else { tall };
     let widest = if LYRIC_MAX_W > w { LYRIC_MAX_W } else { w };
     (widest + 40.0, h + SHADOW + 6.0)
 };
@@ -765,10 +1109,19 @@ const ICON_GLOBE: char = '\u{E774}';
 /// Terminal, for the agents page.
 const ICON_TERMINAL: char = '\u{E756}';
 const ICON_CHEVRON_UP: char = '\u{E70E}';
+/// Padlock, for the lock screen's tab row.
+const ICON_LOCK: char = '\u{E72E}';
 /// Envelope, for the Mail page.
 const ICON_MAIL: char = '\u{E715}';
 /// Open envelope: the hover action that opens Gmail.
 const ICON_MAIL_OPEN: char = '\u{E8F1}';
+/// Heart, for the Tako page and its donation notice.
+const ICON_HEART: char = '\u{EB51}';
+/// Tako page sections: leaderboard star, milestone flag, poll list, VIP people.
+const ICON_STAR: char = '\u{E734}';
+const ICON_FLAG: char = '\u{E7C1}';
+const ICON_LIST: char = '\u{E8FD}';
+const ICON_PEOPLE: char = '\u{E716}';
 /// Puzzle piece, for the Plugins page.
 const ICON_PLUGIN: char = '\u{EA86}';
 /// Notifications off (Segoe Fluent "RingerSilent"), for quiet mode.
@@ -989,8 +1342,8 @@ impl Renderer {
             .map(|(_, hit)| *hit)
     }
 
-    /// Where a clickable area was recorded in the last full frame, for tests and layout checks.
-    #[cfg(test)]
+    /// Where a clickable area was recorded in the last full frame (this frame, once drawn): for
+    /// the pressed plate, tests, and layout checks.
     pub fn hit_rect(&self, hit: Hit) -> Option<D2D_RECT_F> {
         self.hits.borrow().iter().find(|(_, h)| *h == hit).map(|(r, _)| *r)
     }
@@ -1126,21 +1479,34 @@ impl Renderer {
                 self.target.DrawGeometry(shape, &self.brush, 1.0, None::<&ID2D1StrokeStyle>);
             }
 
-            // Content is clipped to the shape body so it never draws outside it.
+            // Content is clipped to the shape body so it never draws outside it, and is laid out
+            // at its own shape's size (see `Scene::layout`), centred like the shape.
             self.target.PushAxisAlignedClip(&rect(x0, 0.0, x1, h), D2D1_ANTIALIAS_MODE_ALIASED);
+            let span = |i: usize| {
+                let (lw, lh) = scene.layout[i];
+                let (lw, lh) = if lw > 0.0 { (lw, lh) } else { (w, h) };
+                (cx - lw / 2.0, cx + lw / 2.0, lh)
+            };
             if pill > 0.01 {
-                self.draw_pill(scene, x0, x1, h, pill);
+                let (l, r, lh) = span(0);
+                self.draw_pill(scene, l, r, lh, pill);
             }
             if lyric > 0.01 {
-                self.draw_lyric_pill(scene, x0, x1, h, lyric);
+                let (l, r, lh) = span(1);
+                self.draw_lyric_pill(scene, l, r, lh, lyric);
             }
             if hud > 0.01
                 && let Some(data) = scene.hud
             {
-                self.draw_hud(scene, data, x0, x1, h, hud);
+                let (l, r, lh) = span(2);
+                self.draw_hud(scene, data, l, r, lh, hud);
             }
             if panel > 0.01 {
-                self.draw_panel(scene, x0, x1, panel);
+                let (l, r, _) = span(3);
+                self.draw_panel(scene, l, r, panel);
+            }
+            if let Some(area) = scene.pressed.and_then(|hit| self.hit_rect(hit)) {
+                self.press_plate(area);
             }
             // Thin line (window maximized) with no content: the privacy dot stays at its right end.
             if h < SLIM_MAX_H && scene.alpha.iter().all(|a| *a < 0.01) {
@@ -1500,6 +1866,15 @@ impl Renderer {
         self.rounded(area, radius, self.tint(fill), alpha);
     }
 
+    /// The pressed state of any click target, drawn over it: one rule for buttons, rows, keys,
+    /// and tiles. A square target (an icon button) gets a circle; anything else follows the
+    /// row radius, or the capsule radius when it is that short.
+    fn press_plate(&self, area: D2D_RECT_F) {
+        let (w, h) = (area.right - area.left, area.bottom - area.top);
+        let radius = if (w - h).abs() < 2.0 { h / 2.0 } else { (h / 2.0).min(tokens::RADIUS_ROW) };
+        self.rounded(area, radius, self.tint(tokens::FILL_PRESS), 1.0);
+    }
+
     /// A circular ghost icon button, the shape rust-ui uses for its icon-size buttons.
     fn icon_button(&self, cx: f32, cy: f32, radius: f32, hovered: bool, alpha: f32) {
         if hovered {
@@ -1535,25 +1910,6 @@ impl Renderer {
         self.text(title, &self.fonts.label_center, rect(l, title_y - 9.0, r, title_y + 9.0), p.soft, alpha);
         if has_hint {
             self.text(hint, &self.fonts.caption_center, rect(l, hint_y - 8.0, r, hint_y + 8.0), p.muted, alpha);
-        }
-    }
-
-    /// A badge, as rust-ui's `Badge`: a compact count or label on a secondary surface. `tone`
-    /// picks the fill when the badge carries meaning (waiting = amber), otherwise it is neutral.
-    fn badge(&self, cx: f32, cy: f32, text: &str, tone: Option<D2D1_COLOR_F>, alpha: f32) {
-        let p = &self.pal;
-        let width = self.text_width(text, &self.fonts.tiny) + 12.0;
-        let area = rect(cx - width / 2.0, cy - 8.0, cx + width / 2.0, cy + 8.0);
-        match tone {
-            Some(color) => {
-                // Status fills are light in every theme, so their label is ink (see `ON_STATUS`).
-                self.rounded(area, 4.0, color, alpha);
-                self.text(text, &self.fonts.tiny, area, ON_STATUS, alpha);
-            }
-            None => {
-                self.rounded(area, 4.0, p.badge, alpha);
-                self.text(text, &self.fonts.tiny, area, if self.pal.text.r > 0.5 { p.body } else { p.text }, alpha);
-            }
         }
     }
 

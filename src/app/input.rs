@@ -21,7 +21,8 @@ impl App {
                 return;
             }
         }
-        let hit = if self.expanded { self.hit_at(lparam) } else { None };
+        // The player's buttons answer without the panel being open.
+        let hit = if self.expanded || self.player.is_some() { self.hit_at(lparam) } else { None };
         self.set_hovered(hit);
     }
 
@@ -38,7 +39,8 @@ impl App {
         if !self.hovering {
             self.hovering = true;
             self.kill_timer(TIMER_CLOSE);
-            if !self.expanded {
+            // The player keeps its shape; hovering it does not open the panel underneath.
+            if !self.expanded && self.player.is_none() {
                 self.set_timer(TIMER_OPEN, OPEN_DELAY_MS);
                 self.peek = true;
                 self.refresh();
@@ -47,6 +49,7 @@ impl App {
     }
 
     pub(super) fn on_leave(&mut self) {
+        self.set_pressed(None);
         self.tracking_leave = false;
         self.hovering = false;
         if std::mem::take(&mut self.peek) {
@@ -60,10 +63,12 @@ impl App {
     }
 
     pub(super) fn on_press(&mut self, lparam: LPARAM) {
-        if !self.expanded {
+        if !self.expanded && self.player.is_none() {
             return;
         }
-        match self.hit_at(lparam) {
+        let hit = self.hit_at(lparam);
+        self.set_pressed(hit.filter(|hit| hit.clickable()));
+        match hit {
             Some(Hit::ShelfItem(id)) => {
                 let (x, y) = point(lparam);
                 self.press = Some((id, POINT { x, y }));
@@ -108,7 +113,18 @@ impl App {
         }
     }
 
+    /// Show `hit` as pressed (or nothing), redrawing only when that changes.
+    pub(super) fn set_pressed(&mut self, hit: Option<Hit>) {
+        if self.pressed != hit {
+            self.pressed = hit;
+            if !self.animating() {
+                self.redraw();
+            }
+        }
+    }
+
     pub(super) fn on_click(&mut self, lparam: LPARAM) {
+        self.set_pressed(None);
         if let Some(slider) = self.slider_drag.take() {
             let _ = unsafe { ReleaseCapture() };
             if slider == Hit::MediaSeek {
@@ -122,7 +138,7 @@ impl App {
             return;
         }
         self.kill_timer(TIMER_OPEN);
-        if !self.expanded {
+        if !self.expanded && self.player.is_none() {
             // A message HUD opens its app, a download HUD reveals the file in its folder
             // (not from the lock screen).
             if self.hud_visible && !self.locked {
@@ -137,6 +153,12 @@ impl App {
                     // A new-mail notice opens Gmail itself: that is where the message is read.
                     Some(Hud::Mail { .. }) => {
                         dnd::open_url("https://mail.google.com");
+                        true
+                    }
+                    // A media share notice plays its video; other donations open the Tako page.
+                    Some(Hud::Tako { url, name, line, .. }) if !url.is_empty() => {
+                        let (url, name, line) = (url.clone(), name.clone(), line.clone());
+                        self.play(&url, name, line);
                         true
                     }
                     Some(Hud::Download { path, .. }) => {
@@ -164,6 +186,7 @@ impl App {
                     Hud::Agent { .. } => Page::Agents,
                     Hud::Mail { .. } => Page::Mail,
                     Hud::Prayer { .. } => Page::Prayer,
+                    Hud::Tako { .. } => Page::Tako,
                     _ => Page::Home,
                 };
                 // Opening the notice is the answer to it: the timer alarm stops here.
@@ -183,6 +206,7 @@ impl App {
         let typing_here = matches!(hit, Some(Hit::TaskInput | Hit::CityInput | Hit::AgendaInput)) || match hit {
             Some(Hit::GoogleClient(0)) => self.edit_field == Some(Field::GoogleId),
             Some(Hit::GoogleClient(_)) => self.edit_field == Some(Field::GoogleSecret),
+            Some(Hit::TakoKey) => self.edit_field == Some(Field::TakoKey),
             _ => false,
         };
         if self.editing() && !typing_here {
@@ -256,6 +280,10 @@ impl App {
                 self.tasks.remove(index);
                 self.tasks.save();
             }
+            Hit::TaskTop(index) => {
+                self.tasks.move_to_top(index);
+                self.tasks.save();
+            }
             Hit::TaskInput => self.begin_edit(Field::Task),
             Hit::TasksClearDone => {
                 self.tasks.clear_done();
@@ -313,6 +341,24 @@ impl App {
             Hit::Command(command) => self.on_command(command),
             Hit::PluginsReload => self.reload_plugins(),
             Hit::PluginsFolder => plugins::open_folder(self.hwnd),
+            // Paste fills an empty setup box straight from the clipboard.
+            Hit::Paste(target) => {
+                if let Some(text) = clipboard_text().map(|text| text.trim().to_string()).filter(|text| !text.is_empty()) {
+                    match target {
+                        ui::PasteTarget::GoogleId => self.google_id = text,
+                        ui::PasteTarget::GoogleSecret => self.google_secret = text,
+                        ui::PasteTarget::TakoLink => {
+                            self.tako.link = text;
+                            self.tako.problem = None;
+                        }
+                    }
+                    self.rebuild_views();
+                }
+            }
+            Hit::PluginsExample => {
+                plugins::write_example();
+                self.reload_plugins();
+            }
             Hit::PluginRow(index) => {
                 if let Some(row) = self.plugins.rows().into_iter().chain(self.plugins.problems()).nth(index) {
                     dnd::open_url(&row.url);
@@ -324,6 +370,23 @@ impl App {
             Hit::GoogleClient(0) => self.begin_edit(Field::GoogleId),
             Hit::GoogleClient(_) => self.begin_edit(Field::GoogleSecret),
             Hit::GoogleDisconnect => self.disconnect_google(),
+            Hit::TakoConnect => {
+                // Connect uses what is in the box, also while it is still being typed into.
+                if self.edit_field == Some(Field::TakoKey) {
+                    self.end_edit(true, true);
+                }
+                self.connect_tako();
+            }
+            Hit::TakoKey => self.begin_edit(Field::TakoKey),
+            Hit::TakoDisconnect => self.disconnect_tako(),
+            Hit::SettingsSection(section) => self.settings_section = section,
+            Hit::TakoSection(section) => {
+                self.tako.section = section;
+                self.rebuild_views();
+            }
+            Hit::TakoRow(index) => self.open_tako_row(index),
+            Hit::PlayerClose => self.close_player(),
+            Hit::PlayerBrowser => self.player_to_browser(),
             Hit::GoogleOpen | Hit::MailRow(_) => {
                 if google::connected() {
                     dnd::open_url("https://mail.google.com");
@@ -331,13 +394,31 @@ impl App {
                     self.connect_google();
                 }
             }
+            // A row opens in place; its Switch button brings the agent's window forward.
             Hit::AgentRow(index) => {
-                if let Some(session) = self.agent_rows.get(index) {
+                if let Some(id) = self.agent_list.get(index).map(|row| row.id.clone()) {
+                    self.agent_open = if self.agent_open.as_ref() == Some(&id) { None } else { Some(id) };
+                }
+            }
+            Hit::AgentSwitch(index) => {
+                if let Some(session) = self.agent_list.get(index) {
                     let (pid, project) = (session.pid, session.project.clone());
                     if self.focus_agent(pid, &project) {
                         self.set_expanded(false);
                     }
                 }
+            }
+            Hit::AgentDismiss(index) => {
+                if let Some(id) = self.agent_list.get(index).map(|row| row.id.clone()) {
+                    self.agent_dismissed.push(id);
+                    self.agent_open = None;
+                    self.rebuild_agent_list();
+                }
+            }
+            Hit::AgentFilter(filter) => {
+                self.agent_filter = filter;
+                self.agent_scroll = 0;
+                self.rebuild_agent_list();
             }
             Hit::AgentsRefresh => {
                 if let Some(listener) = &self.agent_listener {
@@ -363,7 +444,7 @@ impl App {
                 }
             }
             Hit::AgentFolder(index) => {
-                if let Some(session) = self.agent_rows.get(index)
+                if let Some(session) = self.agent_list.get(index)
                     && !session.folder.is_empty()
                 {
                     dnd::reveal(self.hwnd, std::path::Path::new(&session.folder));
@@ -379,6 +460,7 @@ impl App {
             | Hit::AgendaList
             | Hit::AgendaRow(_)
             | Hit::AgentList
+            | Hit::AgentLimits
             | Hit::PluginList
             | Hit::DropShare => {}
         }
@@ -429,7 +511,7 @@ impl App {
             {
                 self.shelf.scroll_by(step)
             }
-            Some(Hit::TaskList | Hit::TaskToggle(_) | Hit::TaskRemove(_))
+            Some(Hit::TaskList | Hit::TaskToggle(_) | Hit::TaskRemove(_) | Hit::TaskTop(_))
                 if !horizontal && self.tasks.items.len() > tasks::VISIBLE =>
             {
                 self.tasks.scroll_by(step)
@@ -446,8 +528,8 @@ impl App {
                 self.agenda.scroll_by(step, count);
             }
             Some(Hit::PluginList) if !horizontal => {}
-            Some(Hit::AgentList | Hit::AgentRow(_)) if !horizontal && self.agent_rows.len() > agents::VISIBLE => {
-                let last = self.agent_rows.len() - agents::VISIBLE;
+            Some(Hit::AgentList | Hit::AgentRow(_)) if !horizontal && self.agent_list.len() > agents::VISIBLE => {
+                let last = self.agent_list.len() - agents::VISIBLE;
                 self.agent_scroll = (self.agent_scroll as i32 + step).clamp(0, last as i32) as usize;
             }
             // Wheel over a slider: up/down 2%.
@@ -523,12 +605,13 @@ impl App {
             // The client and feed boxes start with what is already there, so a typo can be fixed.
             Field::GoogleId => self.edit_text = self.google_id.clone(),
             Field::GoogleSecret => self.edit_text = self.google_secret.clone(),
+            Field::TakoKey => self.edit_text = self.tako.link.clone(),
         }
         self.edit_field = Some(field);
         self.pending_surrogate = None;
         self.edit_return = Some(unsafe { GetForegroundWindow() });
-        // The Mail page shows which box is being typed into.
-        if matches!(field, Field::GoogleId | Field::GoogleSecret) {
+        // The Mail and Tako pages show which box is being typed into.
+        if matches!(field, Field::GoogleId | Field::GoogleSecret | Field::TakoKey) {
             self.rebuild_views();
         }
         self.set_activatable(true);
@@ -550,6 +633,7 @@ impl App {
         match field {
             Some(Field::GoogleId) if commit => self.google_id = text.trim().to_string(),
             Some(Field::GoogleSecret) if commit => self.google_secret = text.trim().to_string(),
+            Some(Field::TakoKey) if commit => self.tako.link = text.trim().to_string(),
             // The feed box keeps its text until the + button is pressed.
             Some(_) => {}
             None => {}
@@ -585,8 +669,8 @@ impl App {
         if self.expanded && !self.hovering {
             self.set_timer(TIMER_CLOSE, CLOSE_DELAY_MS);
         }
-        // The committed text returns to the Mail page's boxes.
-        if matches!(field, Some(Field::GoogleId | Field::GoogleSecret)) {
+        // The committed text returns to the Mail and Tako pages' boxes.
+        if matches!(field, Some(Field::GoogleId | Field::GoogleSecret | Field::TakoKey)) {
             self.rebuild_views();
         }
     }
@@ -616,6 +700,11 @@ impl App {
             // Enter in a Google client box closes it; the Connect button then uses the text.
             0x0D if matches!(self.edit_field, Some(Field::GoogleId | Field::GoogleSecret)) => {
                 self.end_edit(true, true)
+            }
+            // Enter in the Tako box connects with the pasted link.
+            0x0D if self.edit_field == Some(Field::TakoKey) => {
+                self.end_edit(true, true);
+                self.connect_tako();
             }
             // Enter in the agenda box: save and get ready for the next item; an empty box closes.
             0x0D if self.agenda.draft.is_some() => {
@@ -654,7 +743,7 @@ impl App {
         }
         // Typing and Backspace change the text of a Google box on the Mail page. Enter and Escape
         // closed the box already, and `end_edit` rebuilt the view for that.
-        if matches!(self.edit_field, Some(Field::GoogleId | Field::GoogleSecret)) {
+        if matches!(self.edit_field, Some(Field::GoogleId | Field::GoogleSecret | Field::TakoKey)) {
             self.rebuild_views();
         }
         self.refresh();

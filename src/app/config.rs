@@ -38,6 +38,8 @@ pub(super) const TIMER_WELCOME: usize = 16;
 pub(super) const TIMER_CALENDARS: usize = 17;
 /// Mail and calendar are refreshed while their pages (or Home) are in use.
 pub(super) const TIMER_GOOGLE: usize = 19;
+/// The Tako player looks for its Edge window and keeps it docked.
+pub(super) const TIMER_PLAYER: usize = 20;
 pub(super) const WELCOME_DELAY_MS: u32 = 1_300;
 /// Result of the Administrator step for messages (see `identity`): 0 success, 1 failure,
 /// 2 Administrator permission denied.
@@ -84,6 +86,10 @@ pub(super) const LOCK_KEY_HUD_MS: u32 = 1_400;
 pub(super) const MESSAGE_HUD_MS: u32 = 5_000;
 /// A new unread mail notice.
 pub(super) const MAIL_HUD_MS: u32 = 5_000;
+/// A Tako donation: long enough to read a short message.
+pub(super) const TAKO_HUD_MS: u32 = 7_000;
+/// Content fainter than this no longer holds a shrinking shape back.
+pub(super) const HOLD_ALPHA: f32 = 0.04;
 pub(super) const SCREENSHOT_HUD_MS: u32 = 4_000;
 pub(super) const AGENT_HUD_MS: u32 = 6_000;
 pub(super) const DOWNLOAD_HUD_MS: u32 = 4_500;

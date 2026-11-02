@@ -1,6 +1,7 @@
 //! Media controls, seeking, and lyrics.
 
 use super::*;
+use crate::ui::LyricStatus;
 
 impl App {
     pub(super) fn media_command(&mut self, button: Button) {
@@ -99,7 +100,7 @@ impl App {
         let key = lyrics::key(&m.title, &m.artist);
         let status = |text| Some(LyricsView { lines: Default::default(), scroll: 1.0, status: Some(text) });
         let Some(lyrics) = self.lyrics.as_ref().filter(|l| l.key == key && !l.lines.is_empty()) else {
-            return if self.lyric_pending.as_ref() == Some(&key) { status("Searching for lyrics…") } else { status("Lyrics unavailable") };
+            return if self.lyric_pending.as_ref() == Some(&key) { status(LyricStatus::Searching) } else { status(LyricStatus::Missing) };
         };
         let current = lyrics.current(m.position_now()).map_or(-1, |i| i as isize);
         let lines = std::array::from_fn(|k| match current + k as isize - 2 {

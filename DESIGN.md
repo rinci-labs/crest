@@ -52,7 +52,7 @@ main.rs ──► app::run()
   tall) that also shows the page name when the row has room beside the caption; a hovered icon
   gets a soft key. Pages have no title row of their own. Mouse wheel and two-finger swipe still
   step through pages (Settings is not stepped through). The open panel is 440 × 192 DIP (660 wide
-  with the calendar or lyrics, 240 tall on Settings). The page deck keeps its 16 DIP gap to the
+  with the calendar or lyrics, 560 × 256 on Settings). The page deck keeps its 16 DIP gap to the
   bottom edge on the taller panel and never gets shorter than on a normal page.
 - Page content is drawn `CONTENT_SHIFT` (14 DIP) below its own coordinates, under the tab row;
   the renderer applies the shift to drawing and click areas alike.
@@ -66,6 +66,15 @@ main.rs ──► app::run()
   lines) with the next one below, as Apple Music does; the previous line fades out above. Hover highlights ease in over about 150 ms (`HOVER_TAU`).
 - Notification numbers roll to the new value in 0.22 seconds.
 - A shape animation counts as finished when the size difference is below 0.05 DIP.
+- Content never squeezes: each content (pill, lyric pill, notice, panel) is laid out at the size
+  of its own shape (`Scene::layout`), centred, and the moving shape only clips it. A shape that
+  gets smaller waits until the old content has faded below `HOLD_ALPHA` (0.04) before it starts
+  to shrink; panel-to-panel moves keep their content and never wait.
+- Pressed state: while the mouse button is held on any click target, a plate at 10% of the text
+  colour (`FILL_PRESS`) covers it, a circle on a square target, the row or capsule radius on
+  anything else. One rule for buttons, rows, keys, and tiles.
+- A button that cannot be used yet (Connect with nothing valid to connect) is drawn at 40%
+  (`DISABLED`) and is not clickable.
 
 Apart from `PAGE_SLIDE` and the corner radius, these values live in `src/app/config.rs`.
 
@@ -158,7 +167,8 @@ layered window.
 - **List cell** (`Renderer::list_cell`, `Cell`): the two-line row of every list page (Agents,
   Mail, Plugins), as in an iOS list: a lead area for a dot or avatar, the title with trailing
   text, and the subtitle. 38 DIP tall (`LIST_ROW_H`), two per page (`LIST_ROWS`) from
-  `LIST_TOP` (6 DIP inside the deck), then a footer at `ROW_Y` with the page action and "+N more".
+  `LIST_TOP` (6 DIP inside the deck), then a footer at `ROW_Y` with the page action and "+N more"
+  (on Agents, "+N more" moves to the caption so the footer holds the plan meters).
   Empty pages centre their state in `EMPTY_AREA`, between the deck top and the footer.
 - **Capsule slider** (`Renderer::capsule_slider`): the Controls page's control-centre slider,
   26 DIP tall, filled from the left, icon inside the left end (mute button for volume), value at
@@ -214,7 +224,7 @@ Controls; both get the tab row's soft hover key.
 ## Panel pages
 
 Order from `Page::ALL`: Home, Controls, Shelf, Focus, Timer, Water, Prayer, Tasks, System,
-Agents, Mail, Plugins. Mail and Plugins stay off the tab bar while their switch is off
+Agents, Mail, Plugins, Tako. Mail, Plugins, and Tako stay off the tab bar while their switch is off
 (`Pages::set_feature`, `Settings::sync_pages`); the Pages menu still lists them.
 Focus and Timer share one tab (`Pages::tab`): the stopwatch tab reopens whichever was used last,
 and a Focus | Timer switch takes the caption slot of both pages (the session count and the timer
@@ -226,13 +236,20 @@ left/right by right-clicking the panel. Hiding a page also turns off its feature
   need you or are working); each chip opens its page. Not shown on the lock screen. With the
   calendar column it merges three sources (see [Home calendar](#home-calendar)).
 - **Settings** is not in `Page::ALL`: it cannot be hidden or moved and is opened from the gear.
-  It opens on the taller panel (`View::PanelTall`) and holds, one row each on a 34 DIP rhythm
-  (`SETTINGS_ROWS`): theme swatches with a S/M/L size control, six switches (Lyrics, Weather,
-  Mail, Calendar, Google Cal, Plugins), the prayer method and Asr school, and agent hooks. Every control sends the same `tray::Command` as the tray menu
+  It opens on the larger panel (`View::PanelTall`, 560 × 256) laid out like a system settings
+  window: a 112 DIP sidebar of sections (`SettingsSection`: Appearance, Features, Prayer, Agents,
+  with the version at its foot), a hairline, then the chosen section's title, a one-line
+  description, and up to four rows on a 32 DIP rhythm (`SETTINGS_ROW_PITCH`). Appearance holds
+  the theme swatches, the Small | Medium | Large size, notification sounds, and compact
+  indicators; Features eight switch cards in two columns (the globe marks the ones that use the
+  internet), including Tako; Prayer the method, Asr school, and reminder; Agents the notices
+  switch and an Install action per hook, which reads "Installed" with a check once present.
+  Rows are named on the left with the control on the right and a hairline between them. Every control sends the same `tray::Command` as the tray menu
   (`Hit::Command`), so both paths behave identically; rarer options stay in the tray menu.
-- **Mail** and **Plugins** are off by default. The tray menu repeats the Mail, Google Calendar
-  events, and Plugins switches, and adds what Settings has no control for: Google:
-  Connect/Disconnect, Open plugins folder, and Calendar feeds (`calendars.txt`).
+- **Mail**, **Plugins**, and **Tako** are off by default. The tray menu repeats the Mail, Google
+  Calendar events, and Plugins switches, and adds what Settings has no control for: Google:
+  Connect/Disconnect, Open plugins folder, Calendar feeds (`calendars.txt`), Tako donations, and
+  Tako: Disconnect.
 
 ### Home calendar
 
@@ -302,15 +319,19 @@ States, in sort order: **Needs you** (orange, waiting for permission or an answe
 
 - `agents::Listener` runs on its own thread. Folder change notifications wake it at once; a 5 s
   tick catches exited processes. Scans are at least 400 ms apart while files keep changing.
-- Kept quiet on purpose: two roomy rows (42 DIP, `agents::VISIBLE`), the rest summed up as
-  "+N more" and reached with the mouse wheel (up to 12 sessions).
-- Row: state dot, title, and a short status on the right ("Needs you" in orange, "Working",
-  "Done · 3m", or the idle age). A dim second line names the agent in its tint and the project;
-  only a session that needs you adds its waiting reason.
-- Caption: "N need you" when any session waits, otherwise nothing. An **Install hooks** action is
-  always available; it merges display-only lifecycle relays into Claude, Cursor, and Copilot
+- Layout: the large panel (560 × 256, like Settings). A 150 DIP column on the left holds the plan
+  limits and, at its foot, the hooks link; the sessions are on the right, Refresh in the caption.
+- Filter keys above the rows, on the tab row's key: All, Waiting, Working, Done, each with its
+  count; the Waiting count is amber while anything waits. A used-up plan adds a red banner
+  ("Claude used its 5h limit · resets in 1h") above the rows.
+- Rows (40 DIP, three visible, `agents::VISIBLE`; the rest scroll with the wheel): a two-letter
+  badge in the agent's tint ("CL", "CX"), the title, the project (and a waiting reason) under it,
+  and the state on the right with its dot. Clicking a row opens it in place (74 DIP) with its
+  detail and its actions: **Switch** to the agent's window, **Folder**, and for a finished
+  session **Dismiss**, which hides it until it works again.
+- **Install hooks** merges display-only lifecycle relays into Claude, Cursor, and Copilot
   configuration without replacing third-party hooks. Codex and omp keep using native readers.
-  Once every relay is present the action reads "Hooks on" in muted text; the Settings page marks
+  Once every relay is present the link reads "Hooks on" in dim text; the Settings page marks
   each installed provider with a check.
 - Other tools join with one command: `crest.exe --agent-hook <tool> [event]` writes the same
   bounded status record. The tool may instead name itself in the payload with `crest_agent` (or
@@ -320,13 +341,28 @@ States, in sort order: **Needs you** (orange, waiting for permission or an answe
   `Kind::Other` rows never look like the built-in agents. A permission request is answered
   `{"permissionDecision":"ask"}` (Copilot) or `{"permission":"ask"}` (Cursor): Crest has no
   approval card, so it must never approve, and silence would make the agent hang.
-- Clicking a row brings the agent's window forward: the agent pid's parent chain is walked (at
+- Switch brings the agent's window forward: the agent pid's parent chain is walked (at
   most 6 steps) to the first process with a visible top-level window (terminal or editor). When
   the pid is unknown (Codex, Copilot CLI, Cursor chats), a window whose title contains the
-  project folder name is used instead. Hovering a row exposes a separate project-folder action.
+  project folder name is used instead.
 - A notice appears when a session starts waiting or a running session finishes (tray toggle
   "Coding agent notices"). Clicking it switches to the agent's window, or opens the Agents page
   when no window is found.
+- **Plan limits** (`agents/limits.rs`): the left column lists every agent that reported limits,
+  its name after a dot in its tint, then each window ("5h", "Week") as a bar with its share. Bars
+  use the accent, amber from 75%, red from 90%; a window from 75%, and every window while the
+  column is hovered, shows the time until it resets ("↻ 2h", "↻ 3d") in place of the share, so
+  each window stays one line. From 75% the tightest
+  agent gets the Home glance chip ("Codex 92%") unless a session is waiting, which comes first. Sources, reread at most every 10 s:
+  - Codex: `rate_limits` of the newest rollout's last `token_count` event (`limit_id` "codex";
+    `primary` is the 5-hour window, `secondary` the weekly one), tail only.
+  - Claude Code: only its status line command receives `rate_limits`, so Crest offers an opt-in
+    relay. Setting `"statusLine": {"type": "command", "command": "crest.exe --statusline [your
+    command…]"}` writes `%APPDATA%\Crest\agent-hooks\limits-claude.txt` (`<window> <used>
+    <resets_at>` per line, only when a window moved) and then runs your own status line command
+    with the same input, so an existing status line keeps working. Crest never edits this setting
+    itself. Present only for Pro, Max, and Ultra plans, after the session's first response.
+  - A window whose reset time has passed is dropped rather than guessed at.
 - No network, no databases, no full conversations: only small records, bounded heads and tails,
   lifecycle event names, tool names, project paths, and file times. Hook prompts and command
   arguments are never persisted.
@@ -388,3 +424,69 @@ every = 15
 - This page runs local code the user wrote, under the user's own permissions. A plugin may use
   the internet on its own if its command does; Crest never passes data to it. The tray menu has
   **Plugins** and **Open plugins folder**; the caption ("N plugins") reloads the folder.
+
+### Tako page
+
+Donations and widgets from the creator's [Tako](https://tako.id) overlays. `src/feeds/tako.rs`
+reads them the way the browser sources in OBS do; `src/app/tako.rs` owns the connection and the
+page's data. Off by default; turned on in Settings → Features or Settings → Tako.
+
+- **Setup:** the same sheet as the Google setup: "Connect Tako" with **Connect** on its right,
+  one hint, and one box for any overlay link (`…/overlay/alert?overlay_key=<key>`, the path form
+  `…/overlay/alert/<key>`, or the bare key; every overlay of a creator shares the key). Only the
+  key is kept, DPAPI-encrypted in `tako.txt`; the box is cleared once it is saved, and the key is
+  never logged.
+- **Realtime:** a Pusher-protocol WebSocket to `wss://relay.tako.id/app/tako` (WinHTTP's own
+  upgrade, `http::WebSocket`), public channel `overlay.<key>`. `messages` only says something
+  changed; `command` "alert.test" and "mediashare.test" are the dashboard's Test buttons, shown as
+  test notices that are not kept. A second thread pings every 25 s and closes the socket to stop
+  the reader.
+- **Data:** `GET https://tako.id/api/v1/overlay/<key>` with `X-Path` naming the overlay, read at
+  connect, on every `messages`, and every 5 minutes: the queues `alert-mediashare` and
+  `soundboard`, and the state of `leaderboard`, `milestone`, `songshare`, `polling`, `timer`, and
+  `vipqueue`. A queue answers one unplayed donation at a time, skipping the ids in
+  `X-Queued-Gift-Ids`; Crest walks it by remembering up to 150 ids. `X-Shared-Data-Version` is
+  echoed per overlay so Tako skips the ~50 KB of overlay settings.
+- **Not read:** gacha, because reading it spends the creator's gacha balance into queued spins
+  (the overlay's read is what rolls the wheel); running text and the QR code, which add nothing
+  Crest can show.
+- **Read-only:** Crest never sends the `PUT` that marks a donation as played, so OBS still plays
+  every alert, video, and sound. Donations already queued when Crest connects (up to 40 reads per
+  queue) are recorded without a notice; later ones arrive as `Hud::Tako`: initials on the accent,
+  the name, the amount (or "10× Mawar" for a gift unit), and one line: the message, "▶ YouTube ·
+  title" for a media share, or "Played “sound”" for the soundboard. A media share notice plays
+  its video; other notices open the page. Media that Tako's filter flagged is never offered.
+- **Player:** `src/system/player.rs` plays a video or song in Microsoft Edge's app mode (no
+  address bar; the same engine WebView2 embeds) inside the island: the shape grows into
+  `View::Player` (600 DIP wide, a 16:9 slot under a row with the sender, the video line, and
+  Browser and Close buttons), and Edge's frameless window is docked over the slot with the
+  slot's corner radius once the spring has settled. While the shape moves, fades, or Crest is
+  hidden, the window is hidden. Until it appears, the slot shows three pulsing dots over
+  "Loading video…"; while it plays, the row's play glyph becomes the music wave. The app polls
+  every 200 ms to find, dock, and notice the window closing; Edge that shows nothing in 15 s
+  gives way to the default browser. Hovering the player does not open the panel. Crest's layered window
+  cannot host a web view and the `windows` crate has no WebView2 bindings, so the player is
+  Edge's own sandboxed process. Only `https` links to YouTube, TikTok, or Instagram are accepted.
+  The video plays alone and starts at once: YouTube refuses its embed on a page with no site
+  behind it (error 153), so Crest serves the one page holding the platform's embed from
+  `127.0.0.1`, on a random port and path, for one minute, with a CSP that allows only those
+  platforms' frames; the embed is rebuilt from the video id alone. The window is InPrivate in
+  the user's own Edge, with no other switches: a separate profile folder would be signed into
+  the Windows account and synced (passwords, extensions) by Edge even for InPrivate, so none is
+  made. Without Edge, an allowed link opens in the default browser; any other link is ignored. Queue ids and the
+  shared-data token that go back to Tako in request headers are checked first (a uuid, a short
+  base64url token), so a reply cannot inject a header.
+- **Layout:** on the large panel (`View::PanelTall`, like Settings), a sidebar of seven sections
+  at a 24 DIP pitch: Recent, Leaderboard, Milestone, Song share, Poll, Timer, VIP queue. Each
+  section has its title with a short count on the right ("2 in queue"), then three list rows
+  (Recent, Song share, VIP queue; a row with a video or song shows a play glyph and plays it) or
+  four lines on a 32 DIP rhythm (Leaderboard with the first place on the accent, Poll with a share
+  bar under each option). Milestone shows the step, the amount raised in the large number font
+  against its target, and a bar; Timer the time left to the minute, refreshed on the minute tick.
+  The caption is the connection state with a dot (green Live, dim Connecting, orange Offline or a
+  refused key).
+- **Settings → Tako:** the connection (Turn on, Set up…, or Disconnect beside its state),
+  Donation notices (alerts and media shares), Soundboard notices, and Show donor messages (off
+  leaves the name and amount; the lock screen never shows them).
+- Reconnects back off from 5 s to 5 minutes. A 404 means Tako no longer knows the key: the page
+  says "Key not accepted" and stops retrying. The lock screen shows nothing of donors or amounts.

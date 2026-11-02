@@ -149,6 +149,38 @@ impl App {
                 self.leave_hidden_page();
                 self.refresh();
             }
+            Command::ToggleTako => {
+                self.settings.tako = !self.settings.tako;
+                // The switch is the user asking for the page, so a hidden one comes back.
+                if self.settings.tako {
+                    self.settings.pages.set_shown(Page::Tako, true);
+                }
+                self.settings.sync_pages();
+                self.settings.save();
+                self.sync_tako();
+                // Turning it on without a key opens the page that asks for one.
+                if self.settings.tako && !self.tako.has_key {
+                    self.go_page(Page::Tako, 1.0);
+                    self.set_expanded(true);
+                }
+                self.leave_hidden_page();
+                self.refresh();
+            }
+            Command::TakoDisconnect => self.disconnect_tako(),
+            Command::TakoOpen => self.open_tako(),
+            Command::ToggleTakoAlerts => {
+                self.settings.tako_alerts = !self.settings.tako_alerts;
+                self.settings.save();
+            }
+            Command::ToggleTakoSounds => {
+                self.settings.tako_sounds = !self.settings.tako_sounds;
+                self.settings.save();
+            }
+            Command::ToggleTakoMessages => {
+                self.settings.tako_messages = !self.settings.tako_messages;
+                self.settings.save();
+                self.rebuild_views();
+            }
             Command::GoogleConnect => {
                 // The page holds the setup boxes, so the sign-in happens where the text was typed.
                 self.settings.mail = true;

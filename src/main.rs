@@ -57,6 +57,12 @@ fn main() -> Result<()> {
             }
             return Ok(());
         }
+        // Opt-in Claude Code status line relay: records the plan's rate-limit windows, then
+        // runs the user's own status line command (the remaining arguments) with the same input.
+        Some("--statusline") => {
+            feeds::agents::statusline(&args[2..]);
+            return Ok(());
+        }
         // Message notification check: `crest.exe --check-notifications [file] [seconds]` (see README).
         Some("--check-notifications") => {
             let out = args.get(2).map_or_else(|| std::env::temp_dir().join("crest-notification-check.txt"), Into::into);

@@ -22,6 +22,9 @@ its own.
   hook, or send a payload with `crest_agent` (or Coucou's `coucou_agent`) naming the tool. Vendor
   event names for Gemini CLI, Antigravity, Copilot, OpenCode, and Hermes are translated, and a
   permission request is answered "ask", so the agent re-prompts in its own terminal.
+  Plan limits show under the list: Codex's 5-hour and weekly windows are read from its own
+  session files; for Claude Code, set its status line to `crest.exe --statusline` (append your
+  existing status line command after it to keep that one running).
 - **Mail**: unread Gmail subjects and senders on the Mail page, read-only (`gmail.readonly`).
   Sign-in needs a Desktop app OAuth client; while its consent screen is in Testing, add your
   address under **Test users**, or Google answers `Error 403: access_denied`.
@@ -35,10 +38,14 @@ its own.
   `command` and an `every` interval. The command prints rows of `title | detail | url`; a row
   with a URL opens in the browser when clicked. Off by default: a plugin runs local code you
   wrote, and Crest passes it no data.
+- **Tako**: donations, media shares, and soundboard sounds from your [Tako](https://tako.id)
+  overlays as a notice the moment they arrive, plus a page with Recent, Leaderboard, Milestone,
+  Song share, Poll, Timer, and VIP queue. Paste any overlay link from the Tako dashboard; Crest
+  only reads, so OBS still plays everything. Off by default.
 - **Pages**: Home (clock or music, plus calendar and agenda), Quick controls (volume, brightness,
   microphone, quiet mode), Shelf (drop files on Crest, or on the Share zone), Focus, Timer, Water,
   Prayer (today's prayer times and a notice before each azan, calculated on this PC),
-  Tasks, System (CPU, GPU, RAM, disk, network), Agents, Mail, and Plugins.
+  Tasks, System (CPU, GPU, RAM, disk, network), Agents, Mail, Plugins, and Tako.
 - **Look**: spring motion, a mascot that glances and reacts, six themes (Ink, Slate, Ocean, Ember,
   Frost, Paper), three sizes. Shrinks to a thin line over maximized windows, hides in full screen,
   and shows limited content on the lock screen.
@@ -116,6 +123,14 @@ Both live under `%APPDATA%\Crest` and each has an entry in the tray menu:
 - **Calendar feeds**: Crest sends a request to each address in `calendars.txt` at most every 30
   minutes, so that host sees this PC's IP address. The address is a secret in itself: plain `http`
   is rejected, and neither the address nor the events are logged.
+- **Tako**, only after you paste an overlay link: Crest reads the overlays' donation queues,
+  leaderboard, milestone, song queue, poll, timer, and VIP queue from tako.id and listens on Tako's realtime relay
+  (relay.tako.id), as the browser source in OBS does. It never marks a donation as played. The
+  overlay key is encrypted with DPAPI in `tako.txt` and never logged; donations are kept in
+  memory only. Media shares and songs play in an InPrivate Microsoft Edge app window, so the
+  video page sees none of your cookies or logins and keeps nothing; only YouTube, TikTok, and
+  Instagram links are opened. To show the video alone, Crest serves the one page holding the
+  platform's embed from `127.0.0.1` for a minute.
 - **Plugins** run a command you wrote, on this PC, with your permissions. Crest passes them no
   data; a plugin may use the internet on its own if its command does. Only `http` and `https` URLs
   in its output open in the browser, and Crest does not fetch them itself.
