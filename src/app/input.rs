@@ -165,6 +165,10 @@ impl App {
                         dnd::reveal(self.hwnd, path);
                         true
                     }
+                    Some(Hud::Update { url, .. }) => {
+                        dnd::open_url(url);
+                        true
+                    }
                     _ => false,
                 };
                 if opened {

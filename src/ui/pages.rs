@@ -372,6 +372,11 @@ impl Renderer {
                 let line = if *ahead == 0 { "The azan is now" } else { "Time to get ready" };
                 lines(&title, Some((time, fill, true)), line, p.muted);
             }
+            Hud::Update { version, .. } => {
+                lead(p.accent, ICON_DOWNLOAD, p.on_accent);
+                let line = format!("You have {} · see what's new", crate::feeds::updates::CURRENT);
+                lines(&format!("Crest {version} is out"), None, &line, p.muted);
+            }
             Hud::Agent { kind, title, project, detail, needs_input, .. } => {
                 // Both fills are light (orange, accent), so the glyph is ink for contrast.
                 let color = if *needs_input { ORANGE } else { p.accent };
@@ -2402,8 +2407,6 @@ impl Renderer {
             self.hit(key, hit);
         }
         let bottom = tokens::DECK_BOTTOM + (s.height - View::Panel.size().1).max(0.0);
-        let version = concat!("Crest ", env!("CARGO_PKG_VERSION"));
-        self.text(version, &self.fonts.tiny, rect(l, bottom - PAD - 16.0, l + SETTINGS_SIDEBAR, bottom - PAD), p.dim, a);
         let line = l + SETTINGS_SIDEBAR + SETTINGS_GAP / 2.0;
         self.separator(line, tokens::DECK_TOP + PAD, bottom - PAD, a);
 
@@ -2419,6 +2422,7 @@ impl Renderer {
             SettingsSection::Prayer => self.settings_prayer(s, cl, r, a),
             SettingsSection::Agents => self.settings_agents(s, cl, r, a),
             SettingsSection::Tako => self.settings_tako(s, cl, r, a),
+            SettingsSection::About => self.settings_about(s, cl, r, a),
         }
     }
 
@@ -2574,6 +2578,34 @@ impl Renderer {
         self.settings_switch(s, l, r, 1, false, ("Donation notices", st.tako_alerts, false, Command::ToggleTakoAlerts), a);
         self.settings_switch(s, l, r, 2, false, ("Soundboard notices", st.tako_sounds, false, Command::ToggleTakoSounds), a);
         self.settings_switch(s, l, r, 3, true, ("Show donor messages", st.tako_messages, false, Command::ToggleTakoMessages), a);
+    }
+
+    /// About: the version, the opt-in update check, and what it found, with the next step.
+    fn settings_about(&self, s: &Scene, l: f32, r: f32, a: f32) {
+        let p = &self.pal;
+        let st = &s.settings;
+        self.settings_row(l, r, 0, false, "Version", false, a);
+        let cy = Self::settings_row_y(0);
+        self.text(crate::feeds::updates::CURRENT, &self.fonts.caption_end, rect(r - 120.0, cy - 8.0, r, cy + 8.0), p.muted, a);
+        self.settings_switch(s, l, r, 1, false, ("Check for updates", st.updates, true, Command::ToggleUpdates), a);
+        self.settings_row(l, r, 2, true, "Latest", false, a);
+        let cy = Self::settings_row_y(2);
+        let (status, color, button) = match (st.updates, s.release, s.update_checking) {
+            (false, ..) => ("Off".to_string(), p.muted, None),
+            (true, _, true) => ("Checking…".to_string(), p.muted, None),
+            (true, Some(version), false) => (format!("{version} available"), p.accent, Some(("View", Command::OpenRelease, Style::Primary))),
+            (true, None, false) => ("Up to date".to_string(), p.muted, Some(("Check now", Command::CheckUpdates, Style::Secondary))),
+        };
+        let mut right = r;
+        if let Some((label, command, style)) = button {
+            let width = self.text_width(label, &self.fonts.label_center) + 28.0;
+            let chip = rect(r - width, cy - CONTROL_H / 2.0, r, cy + CONTROL_H / 2.0);
+            let hit = Hit::Command(command);
+            self.chip(chip, label, style, s.hovered == Some(hit), a);
+            self.hit(chip, hit);
+            right = chip.left - TIGHT;
+        }
+        self.text(&status, &self.fonts.caption_end, rect(l + 90.0, cy - 8.0, right, cy + 8.0), color, a);
     }
 
     /// Coding agents: notices, and the lifecycle hook for each tool that needs one. Codex and

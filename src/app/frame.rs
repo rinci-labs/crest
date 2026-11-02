@@ -523,6 +523,8 @@ impl App {
             welcome: self.welcome && self.expanded && !self.locked,
             settings: self.settings,
             settings_section: self.settings_section,
+            release: self.release.as_ref().map(|release| release.version.as_str()),
+            update_checking: self.update_checking,
         };
         let result = self.renderer.draw(&scene).and_then(|_| self.renderer.present(self.hwnd, self.window_pos(), None));
         if let Err(e) = result {

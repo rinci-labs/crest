@@ -66,6 +66,8 @@ pub enum Event {
     Calendar(crate::tools::feeds::Fetched),
     /// A donation, widget state, or connection change from the Tako overlay.
     Tako(crate::feeds::tako::Update),
+    /// The update check's answer: a newer release, or `None` (current, or the check failed).
+    Update(Option<crate::feeds::updates::Release>),
 }
 
 /// Work for the service thread.

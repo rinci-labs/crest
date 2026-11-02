@@ -7,6 +7,10 @@ and versions follow [Semantic Versioning](https://semver.org).
 
 ### Added
 
+- Update notices, opt-in: Settings > About shows the version and a "Check for updates" switch.
+  Once a day Crest asks GitHub for the latest release; a newer one shows a notice once, and its
+  View button (or Settings > About) opens the release page. Nothing is downloaded automatically.
+- Plan limits for omp, read from its own account database, beside Codex and Claude.
 - Tako page and notices: paste any overlay link from the Tako dashboard. Donations, media
   shares (with the video to open), and soundboard sounds arrive as notices; the page, on the large
   panel, has a section per overlay: Recent, Leaderboard, Milestone, Song share, Poll, Timer, and

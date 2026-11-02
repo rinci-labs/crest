@@ -155,6 +155,10 @@ pub struct Settings {
     pub tako_sounds: bool,
     /// Tako notices show the donor's message; off leaves the name and amount.
     pub tako_messages: bool,
+    /// Check GitHub once a day for a newer Crest (off until the user turns it on).
+    pub updates: bool,
+    /// The newest version already announced (see `updates::code`), so each is announced once.
+    pub update_seen: u32,
     /// Lyrics column beside the music player (lyrics button in the panel). Only applies when
     /// `lyrics` is on.
     pub lyric_panel: bool,
@@ -204,6 +208,8 @@ impl Default for Settings {
             tako_alerts: true,
             tako_sounds: true,
             tako_messages: true,
+            updates: false,
+            update_seen: 0,
             lyric_panel: false,
             messages: Messages::default(),
             hide_content: false,
@@ -268,6 +274,8 @@ impl Settings {
                 "tako-alerts" => settings.tako_alerts = yes,
                 "tako-sounds" => settings.tako_sounds = yes,
                 "tako-messages" => settings.tako_messages = yes,
+                "updates" => settings.updates = yes,
+                "update-seen" => settings.update_seen = value.parse().unwrap_or(0),
                 "lyric-panel" => settings.lyric_panel = yes,
                 "welcomed" => settings.welcomed = yes,
                 "pages" => settings.pages = Pages::parse(value),
@@ -333,6 +341,8 @@ impl Settings {
             format!("tako-alerts={}", yes(self.tako_alerts)),
             format!("tako-sounds={}", yes(self.tako_sounds)),
             format!("tako-messages={}", yes(self.tako_messages)),
+            format!("updates={}", yes(self.updates)),
+            format!("update-seen={}", self.update_seen),
             format!("lyric-panel={}", yes(self.lyric_panel)),
             format!("messages={}", self.messages.key()),
             format!("hide-content={}", yes(self.hide_content)),
@@ -377,6 +387,8 @@ mod tests {
             tako_alerts: false,
             tako_sounds: true,
             tako_messages: false,
+            updates: true,
+            update_seen: 2048,
             lyric_panel: true,
             messages: Messages::AllChat,
             hide_content: true,

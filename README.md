@@ -131,6 +131,9 @@ Both live under `%APPDATA%\Crest` and each has an entry in the tray menu:
   video page sees none of your cookies or logins and keeps nothing; only YouTube, TikTok, and
   Instagram links are opened. To show the video alone, Crest serves the one page holding the
   platform's embed from `127.0.0.1` for a minute.
+- **Check for updates** (Settings > About): once a day Crest asks GitHub for the latest release
+  of Crest, so GitHub sees this PC's IP address and Crest's version. A newer version shows one
+  notice whose button opens the release page; Crest never downloads or runs anything itself.
 - **Plugins** run a command you wrote, on this PC, with your permissions. Crest passes them no
   data; a plugin may use the internet on its own if its command does. Only `http` and `https` URLs
   in its output open in the browser, and Crest does not fetch them itself.

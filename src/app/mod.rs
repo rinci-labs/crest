@@ -46,6 +46,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::{Error, PCWSTR, Result, w};
 
 use crate::feeds::agents;
+use crate::feeds::updates;
 use crate::feeds::google::{self, Mail};
 use crate::feeds::plugins::{self, Plugins};
 use crate::ui::motion::Spring;
@@ -447,6 +448,9 @@ struct App {
     tako_view: TakoView,
     /// Section open on the Settings page.
     settings_section: ui::SettingsSection,
+    /// A newer release found by the opt-in update check, and whether a check is running.
+    release: Option<updates::Release>,
+    update_checking: bool,
     /// The video playing in the player shape.
     player: Option<tako::Playing>,
     /// What the player shape shows; kept while the shape fades out after the video closes.
@@ -617,6 +621,8 @@ impl App {
             tako: tako::TakoState { has_key: crate::feeds::tako::key().is_some(), ..Default::default() },
             tako_view: TakoView::default(),
             settings_section: ui::SettingsSection::default(),
+            release: None,
+            update_checking: false,
             player: None,
             player_view: None,
             clock_text: Default::default(),
@@ -636,6 +642,7 @@ impl App {
         app.update_watchers();
         app.services.send(Task::WatchNetwork(app.settings.wifi));
         app.fetch_weather();
+        app.check_updates();
         app.load_google();
         app.fetch_calendars();
         if app.welcome {

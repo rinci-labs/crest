@@ -55,7 +55,8 @@ Before calling work done: `cargo build` and `cargo test` must pass without error
 - **Logging:** `debug_log!` is for debug builds only. `error_log!` is also written in release
   builds, so **never** include message content, track titles, file names, folder names, or any
   other user data.
-- **Network:** lyrics (LRCLIB), weather (Open-Meteo), calendar feeds, Google, and Tako, each off
+- **Network:** lyrics (LRCLIB), weather (Open-Meteo), calendar feeds, Google, Tako, and the
+  update check (GitHub releases), each off
   by default. New features must not send data out without the user's explicit consent.
 - **User data:** stored as plain text files in `%APPDATA%\Crest` so it can be read with Notepad.
   Do not use binary formats or databases.

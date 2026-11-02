@@ -173,6 +173,8 @@ pub enum Hud {
     Mail { from: String, subject: String, initials: String, more: usize },
     /// Prayer `name` at `time` ("15:12") is `ahead` minutes away; 0 = the azan is now.
     Prayer { name: &'static str, time: String, ahead: u32 },
+    /// A newer Crest release; clicking opens its page.
+    Update { version: String, url: String },
     /// A Tako donation: who, what ("Rp 10.000"), the line under it (the message, a media
     /// share's video, or a soundboard sound), and the video to open when clicked.
     Tako { name: String, value: String, line: String, initials: String, url: String },
@@ -193,6 +195,7 @@ impl Hud {
                 | Hud::Agenda { .. }
                 | Hud::Prayer { .. }
                 | Hud::Agent { .. }
+                | Hud::Update { .. }
         )
     }
 
@@ -202,6 +205,7 @@ impl Hud {
             Hud::Message { .. } | Hud::Mail { .. } => Some("Open"),
             Hud::Tako { url, .. } if !url.is_empty() => Some("Play"),
             Hud::Download { .. } => Some("Show"),
+            Hud::Update { .. } => Some("View"),
             Hud::Screenshot { .. } => Some("View"),
             Hud::Agent { needs_input: true, pid, .. } => Some(if *pid != 0 { "Switch" } else { "View" }),
             _ => None,
@@ -566,15 +570,18 @@ pub enum SettingsSection {
     Agents,
     /// The Tako connection and which donations become notices.
     Tako,
+    /// The version and the opt-in update check.
+    About,
 }
 
 impl SettingsSection {
-    pub const ALL: [SettingsSection; 5] = [
+    pub const ALL: [SettingsSection; 6] = [
         SettingsSection::Look,
         SettingsSection::Features,
         SettingsSection::Prayer,
         SettingsSection::Agents,
         SettingsSection::Tako,
+        SettingsSection::About,
     ];
 
     /// Name in the sidebar.
@@ -585,6 +592,7 @@ impl SettingsSection {
             SettingsSection::Prayer => "Prayer",
             SettingsSection::Agents => "Agents",
             SettingsSection::Tako => "Tako",
+            SettingsSection::About => "About",
         }
     }
 
@@ -596,6 +604,7 @@ impl SettingsSection {
             SettingsSection::Prayer => "Prayer times",
             SettingsSection::Agents => "Coding agents",
             SettingsSection::Tako => "Tako",
+            SettingsSection::About => "About Crest",
         }
     }
 
@@ -607,6 +616,7 @@ impl SettingsSection {
             SettingsSection::Prayer => "Calculated on this PC for your city",
             SettingsSection::Agents => "Notices and hooks for coding agents",
             SettingsSection::Tako => "Donations from your overlay, read-only",
+            SettingsSection::About => "The version, and news of a newer one",
         }
     }
 
@@ -617,6 +627,7 @@ impl SettingsSection {
             SettingsSection::Prayer => ICON_PRAYER,
             SettingsSection::Agents => ICON_TERMINAL,
             SettingsSection::Tako => ICON_HEART,
+            SettingsSection::About => ICON_INFO,
         }
     }
 }
@@ -917,6 +928,10 @@ pub struct Scene<'a> {
     pub settings: Settings,
     /// Section open on the settings page.
     pub settings_section: SettingsSection,
+    /// A newer Crest version found by the update check.
+    pub release: Option<&'a str>,
+    /// The update check is waiting for GitHub.
+    pub update_checking: bool,
     pub hovered: Option<Hit>,
     /// The click target under a held mouse button: it darkens until the button is released.
     pub pressed: Option<Hit>,
@@ -1109,6 +1124,8 @@ const ICON_GLOBE: char = '\u{E774}';
 /// Terminal, for the agents page.
 const ICON_TERMINAL: char = '\u{E756}';
 const ICON_CHEVRON_UP: char = '\u{E70E}';
+/// Info, for Settings > About.
+const ICON_INFO: char = '\u{E946}';
 /// Padlock, for the lock screen's tab row.
 const ICON_LOCK: char = '\u{E72E}';
 /// Envelope, for the Mail page.

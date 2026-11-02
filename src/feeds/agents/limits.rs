@@ -30,6 +30,10 @@ const STALE: u64 = 7 * 24 * 60 * 60;
 const INPUT_MAX: u64 = 64 * 1024;
 /// The Claude windows file, beside the hook records: `<window> <used> <resets_at>` per line.
 const CLAUDE_FILE: &str = "limits-claude.txt";
+/// omp's account database; its `usage_history` table holds the provider's usage snapshots.
+const OMP_DB: &str = "agent.db";
+/// A database larger than this is not omp's small account store.
+const OMP_DB_MAX: u64 = 64 * 1024 * 1024;
 
 /// One rate-limit window, e.g. Codex's 5-hour window at 42%.
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -59,7 +63,11 @@ impl Limits {
 /// Every agent with a known, still-running window.
 pub fn read(home: &Path, now: u64) -> Vec<Limits> {
     let claude = records_dir().and_then(|dir| read_small(&dir.join(CLAUDE_FILE), 1024)).and_then(|text| claude(&text, now));
-    let mut all: Vec<Limits> = claude.into_iter().chain(codex(&home.join(".codex").join("sessions"), now)).collect();
+    let mut all: Vec<Limits> = claude
+        .into_iter()
+        .chain(codex(&home.join(".codex").join("sessions"), now))
+        .chain(omp(&home.join(".omp").join("agent").join(OMP_DB), now))
+        .collect();
     // The agent closest to its limit comes first.
     all.sort_by_key(|limits| std::cmp::Reverse(limits.tightest().map_or(0, |meter| meter.used)));
     all
@@ -120,6 +128,102 @@ fn claude_lines(payload: &str) -> Option<String> {
     (!out.is_empty()).then_some(out)
 }
 
+/// omp's windows: the newest snapshot of each limit in `usage_history` (`used_fraction` 0..1,
+/// `resets_at` in ms). Read-only, through Windows' own SQLite; only those columns are read.
+fn omp(db: &Path, now: u64) -> Option<Limits> {
+    if fs::metadata(db).ok()?.len() > OMP_DB_MAX {
+        return None;
+    }
+    let rows = sqlite::query(db, "SELECT limit_id, window_label, used_fraction, resets_at FROM usage_history \
+         WHERE used_fraction IS NOT NULL AND resets_at IS NOT NULL ORDER BY recorded_at DESC LIMIT 32")?;
+    let mut seen = Vec::new();
+    let meters = rows
+        .into_iter()
+        .filter_map(|row| {
+            let [id, label, used, resets] = row.as_slice() else { return None };
+            if seen.contains(id) {
+                return None;
+            }
+            seen.push(id.clone());
+            let resets_at = resets.parse::<f64>().ok()? as u64 / 1_000;
+            let used = (used.parse::<f64>().ok()? * 100.0).round().clamp(0.0, 100.0) as u8;
+            (resets_at > now).then(|| Meter { window: omp_window(id, label), used, resets_at })
+        })
+        .collect();
+    let meters = sorted(meters);
+    (!meters.is_empty()).then_some(Limits { kind: Kind::Omp, meters })
+}
+
+/// A short window name from omp's limit id ("commandcode:5h") or its label ("Weekly").
+fn omp_window(id: &str, label: &str) -> String {
+    match id.split_once(':').map_or("", |(_, window)| window) {
+        "7d" => "Week".to_string(),
+        short if !short.is_empty() && short.len() <= 4 => short.to_string(),
+        _ if label.eq_ignore_ascii_case("weekly") => "Week".to_string(),
+        _ => label.chars().take(6).collect(),
+    }
+}
+
+/// The few calls of Windows' `winsqlite3.dll` (part of Windows 10 and 11) needed to run one
+/// read-only query. No third-party crate: the functions are bound with `windows-link`.
+mod sqlite {
+    use std::ffi::{CStr, c_void};
+    use std::path::Path;
+
+    windows_link::link!("winsqlite3.dll" "system" fn sqlite3_open_v2(filename: *const u8, db: *mut *mut c_void, flags: i32, vfs: *const u8) -> i32);
+    windows_link::link!("winsqlite3.dll" "system" fn sqlite3_busy_timeout(db: *mut c_void, ms: i32) -> i32);
+    windows_link::link!("winsqlite3.dll" "system" fn sqlite3_prepare_v2(db: *mut c_void, sql: *const u8, bytes: i32, stmt: *mut *mut c_void, tail: *mut *const u8) -> i32);
+    windows_link::link!("winsqlite3.dll" "system" fn sqlite3_step(stmt: *mut c_void) -> i32);
+    windows_link::link!("winsqlite3.dll" "system" fn sqlite3_column_count(stmt: *mut c_void) -> i32);
+    windows_link::link!("winsqlite3.dll" "system" fn sqlite3_column_text(stmt: *mut c_void, column: i32) -> *const u8);
+    windows_link::link!("winsqlite3.dll" "system" fn sqlite3_finalize(stmt: *mut c_void) -> i32);
+    windows_link::link!("winsqlite3.dll" "system" fn sqlite3_close(db: *mut c_void) -> i32);
+
+    const READ_ONLY: i32 = 0x01;
+    const ROW: i32 = 100;
+    /// More rows than any query here asks for.
+    const MAX_ROWS: usize = 64;
+
+    /// Every row of `sql` on the database at `path`, each column as text (NULL as ""), or
+    /// `None` when the database cannot be opened or the query fails.
+    pub fn query(path: &Path, sql: &str) -> Option<Vec<Vec<String>>> {
+        let name = format!("{}\0", path.to_str()?);
+        let sql = format!("{sql}\0");
+        let mut db = std::ptr::null_mut();
+        // SAFETY: both strings are NUL-terminated and outlive the calls; the handles are closed
+        // below on every path once opened.
+        unsafe {
+            if sqlite3_open_v2(name.as_ptr(), &mut db, READ_ONLY, std::ptr::null()) != 0 {
+                if !db.is_null() {
+                    sqlite3_close(db);
+                }
+                return None;
+            }
+            // omp may be writing a snapshot; wait a moment rather than fail.
+            sqlite3_busy_timeout(db, 200);
+            let mut stmt = std::ptr::null_mut();
+            if sqlite3_prepare_v2(db, sql.as_ptr(), -1, &mut stmt, std::ptr::null_mut()) != 0 {
+                sqlite3_close(db);
+                return None;
+            }
+            let columns = sqlite3_column_count(stmt);
+            let mut rows = Vec::new();
+            while rows.len() < MAX_ROWS && sqlite3_step(stmt) == ROW {
+                let row = (0..columns)
+                    .map(|i| {
+                        let text = sqlite3_column_text(stmt, i);
+                        if text.is_null() { String::new() } else { CStr::from_ptr(text.cast()).to_string_lossy().into_owned() }
+                    })
+                    .collect();
+                rows.push(row);
+            }
+            sqlite3_finalize(stmt);
+            sqlite3_close(db);
+            Some(rows)
+        }
+    }
+}
+
 fn codex(sessions: &Path, now: u64) -> Option<Limits> {
     let newest: PathBuf = latest_days(sessions)
         .iter()
@@ -176,6 +280,23 @@ pub fn until(resets_at: u64, now: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn names_omp_windows() {
+        assert_eq!(omp_window("commandcode:5h", "5-hour limit"), "5h");
+        assert_eq!(omp_window("commandcode:7d", "Weekly"), "Week");
+        assert_eq!(omp_window("provider:monthly", "Weekly"), "Week");
+        assert_eq!(omp_window("odd", "Monthly cap"), "Monthl");
+    }
+
+    /// Against omp's real database on this PC: `cargo test omp_database -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn omp_database() {
+        let home = PathBuf::from(std::env::var("USERPROFILE").expect("USERPROFILE"));
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+        println!("{:?}", omp(&home.join(".omp").join("agent").join(OMP_DB), now));
+    }
 
     #[test]
     fn reads_claude_windows() {

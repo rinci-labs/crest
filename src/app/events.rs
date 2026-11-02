@@ -154,6 +154,7 @@ impl App {
                 Event::Plugin(name, output) => self.on_plugin(name, output),
                 Event::Calendar(fetched) => self.on_calendar(fetched),
                 Event::Tako(update) => self.on_tako(update),
+                Event::Update(found) => self.on_update(found),
                 Event::Thumbnail(thumb) => {
                     if self.shelf.get(thumb.id).is_some() {
                         self.renderer.set_thumbnail(&thumb);
@@ -215,6 +216,39 @@ impl App {
     }
 
     /// Fetch the weather for the configured city, then schedule the next refresh.
+    /// Ask for the latest release when the user has turned the check on, and again a day later.
+    pub(super) fn check_updates(&mut self) {
+        if self.settings.updates {
+            self.update_checking = true;
+            updates::check(self.services.notifier());
+            self.set_timer(TIMER_UPDATES, UPDATE_EVERY_MS);
+        } else {
+            self.kill_timer(TIMER_UPDATES);
+            self.update_checking = false;
+            self.release = None;
+        }
+    }
+
+    /// The update check's answer. A release newer than any announced before gets one notice;
+    /// after that it waits in Settings > About.
+    fn on_update(&mut self, found: Option<updates::Release>) {
+        self.update_checking = false;
+        if !self.settings.updates {
+            return;
+        }
+        if let Some(release) = &found {
+            let code = updates::code(&release.version);
+            if code > self.settings.update_seen {
+                self.settings.update_seen = code;
+                self.settings.save();
+                let hud = Hud::Update { version: release.version.clone(), url: release.url.clone() };
+                self.alert(hud, UPDATE_HUD_MS, Sound::Reminder);
+            }
+        }
+        self.release = found;
+        self.refresh();
+    }
+
     pub(super) fn fetch_weather(&mut self) {
         match (&self.city, self.settings.weather) {
             (Some(city), true) => {

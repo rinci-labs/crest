@@ -64,6 +64,7 @@ impl App {
             }
             TIMER_WEATHER => self.fetch_weather(),
             TIMER_PLAYER => self.on_player_timer(),
+            TIMER_UPDATES => self.check_updates(),
             TIMER_CALENDARS => {
                 self.kill_timer(TIMER_CALENDARS);
                 self.fetch_calendars();

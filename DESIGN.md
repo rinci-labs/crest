@@ -362,6 +362,11 @@ States, in sort order: **Needs you** (orange, waiting for permission or an answe
     <resets_at>` per line, only when a window moved) and then runs your own status line command
     with the same input, so an existing status line keeps working. Crest never edits this setting
     itself. Present only for Pro, Max, and Ultra plans, after the session's first response.
+  - omp: the newest snapshot of each limit in `~\.omp\agent\agent.db`, table `usage_history`
+    (`used_fraction`, `resets_at` in ms, the window from `limit_id` such as "commandcode:5h"),
+    read-only through Windows' own `winsqlite3.dll`, bound with `windows-link`; a database over
+    64 MB is skipped. Cursor keeps only the plan's name on disk, and Copilot CLI, Gemini CLI, and
+    OpenCode keep no usage at all, so they show no meters.
   - A window whose reset time has passed is dropped rather than guessed at.
 - No network, no databases, no full conversations: only small records, bounded heads and tails,
   lifecycle event names, tool names, project paths, and file times. Hook prompts and command

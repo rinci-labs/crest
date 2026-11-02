@@ -17,6 +17,8 @@ windows-collections = "0.3.2"
 windows-core = "0.62.2"
 # Completion handlers for WinRT async operations (notification access).
 windows-future = "0.3.2"
+# Binds functions of Windows' own winsqlite3.dll, to read omp's plan limits.
+windows-link = "0.2.1"
 
 [dependencies.windows]
 version = "0.62.2"

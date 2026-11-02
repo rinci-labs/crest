@@ -95,6 +95,11 @@ pub enum Command {
     TakoDisconnect,
     /// Open the Tako page (to paste the overlay link).
     TakoOpen,
+    /// The opt-in daily check for a new Crest release.
+    ToggleUpdates,
+    CheckUpdates,
+    /// Open the newer release's page.
+    OpenRelease,
     /// Which Tako donations become notices, and whether they show the message.
     ToggleTakoAlerts,
     ToggleTakoSounds,
