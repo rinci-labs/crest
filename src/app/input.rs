@@ -22,7 +22,7 @@ impl App {
             }
         }
         // The player's buttons answer without the panel being open.
-        let hit = if self.expanded || self.player.is_some() { self.hit_at(lparam) } else { None };
+        let hit = if self.expanded || self.player_shown() { self.hit_at(lparam) } else { None };
         self.set_hovered(hit);
     }
 
@@ -40,7 +40,7 @@ impl App {
             self.hovering = true;
             self.kill_timer(TIMER_CLOSE);
             // The player keeps its shape; hovering it does not open the panel underneath.
-            if !self.expanded && self.player.is_none() {
+            if !self.expanded && !self.player_shown() {
                 self.set_timer(TIMER_OPEN, OPEN_DELAY_MS);
                 self.peek = true;
                 self.refresh();
@@ -63,7 +63,7 @@ impl App {
     }
 
     pub(super) fn on_press(&mut self, lparam: LPARAM) {
-        if !self.expanded && self.player.is_none() {
+        if !self.expanded && !self.player_shown() {
             return;
         }
         let hit = self.hit_at(lparam);
@@ -138,7 +138,7 @@ impl App {
             return;
         }
         self.kill_timer(TIMER_OPEN);
-        if !self.expanded && self.player.is_none() {
+        if !self.expanded && !self.player_shown() {
             // A message HUD opens its app, a download HUD reveals the file in its folder
             // (not from the lock screen).
             if self.hud_visible && !self.locked {
@@ -157,15 +157,21 @@ impl App {
                     }
                     // A media share notice plays its video; other donations open the Tako page.
                     Some(Hud::Tako { url, name, line, .. }) if !url.is_empty() => {
-                        let (url, name, line) = (url.clone(), name.clone(), line.clone());
-                        self.play(&url, name, line);
+                        let share = super::tako::Share {
+                            url: url.clone(),
+                            name: name.clone(),
+                            line: line.clone(),
+                            artist: String::new(),
+                            audio: false,
+                        };
+                        self.play(share);
                         true
                     }
                     Some(Hud::Download { path, .. }) => {
                         dnd::reveal(self.hwnd, path);
                         true
                     }
-                    Some(Hud::Update { url, .. }) => {
+                    Some(Hud::Update { url, .. } | Hud::Unplayable { url, .. }) => {
                         dnd::open_url(url);
                         true
                     }
@@ -176,6 +182,11 @@ impl App {
                     self.refresh();
                     return;
                 }
+            }
+            // A minimized video comes back with a click on the pill.
+            if self.player.is_some() {
+                self.restore_player();
+                return;
             }
             // Clicking any other HUD opens its related page.
             if self.hud_visible
@@ -389,8 +400,14 @@ impl App {
                 self.rebuild_views();
             }
             Hit::TakoRow(index) => self.open_tako_row(index),
-            Hit::PlayerClose => self.close_player(),
+            // Close skips to the next queued video, if any.
+            Hit::PlayerClose => {
+                self.close_player();
+                self.play_next();
+            }
             Hit::PlayerBrowser => self.player_to_browser(),
+            Hit::PlayerMinimize => self.minimize_player(),
+            Hit::PlayerVideo => self.show_player_video(),
             Hit::GoogleOpen | Hit::MailRow(_) => {
                 if google::connected() {
                     dnd::open_url("https://mail.google.com");

@@ -40,9 +40,10 @@ impl App {
         // A thin line when the active window is maximized, also while the camera/mic is in use
         // (its privacy dot shows at the end of the line). A line touched by the cursor turns back into a pill first.
         let slim = self.mode == Mode::Maximized && !self.locked && !self.peek;
-        // A playing video holds the shape until it is closed; the lock screen keeps it hidden.
-        if self.player.is_some() && !self.locked {
-            View::Player
+        // A playing video holds the shape until it is closed or minimized; the lock screen
+        // keeps it hidden.
+        if self.player_shown() && !self.locked {
+            if self.player_audio() { View::Song } else { View::Player }
         } else if self.expanded {
             // Wide Home with the calendar (not on the lock screen: the agenda is private), or
             // with the lyrics column beside the player.
@@ -183,7 +184,8 @@ impl App {
 
     /// Timer for self-animating content, only while something is actually running.
     pub(super) fn update_ambient(&mut self) {
-        let playing = self.playing();
+        // A minimized video's wave in the pill moves like music's.
+        let playing = self.playing() || self.player_minimized();
         let focusing = self.focus.running();
         let timing = self.timer.running();
         let last_minute = self.timer.remaining(Instant::now()) < Duration::from_secs(60);
@@ -191,6 +193,8 @@ impl App {
             _ if !self.shown => None,
             v if v.is_panel() && self.page == Page::Shelf && self.shelf.drop_hover => Some(DASH_MS),
             View::Pill | View::LyricPill if playing => Some(WAVE_MS),
+            // The song shape's wave and time.
+            View::Song if self.player.is_some() => Some(WAVE_MS),
             // In the last minute the pill counts seconds.
             View::Pill if timing => Some(if last_minute { PROGRESS_MS } else { PILL_FOCUS_MS }),
             View::Pill if focusing => Some(PILL_FOCUS_MS),
@@ -517,7 +521,9 @@ impl App {
             mail: &self.mail_view,
             plugins: &self.plugins_view,
             tako: &self.tako_view,
-            player: self.player_view.as_ref(),
+            // A video behind the pill leaves the panel to its pages.
+            player: self.player_view.as_ref().filter(|_| !self.player_minimized()),
+            player_behind: self.player_minimized(),
             agent_scroll: self.agent_scroll,
             download: download.as_deref(),
             welcome: self.welcome && self.expanded && !self.locked,

@@ -461,8 +461,24 @@ fn preview_states() {
         },
         data.limits[0].clone(),
     ];
-    let video = PlayerView { name: "Budi Santoso".into(), line: "YouTube · Lagu untuk kamu yang sedang belajar".into(), ready: false };
+    let video = PlayerView {
+        name: "Budi Santoso".into(),
+        line: "YouTube · Lagu untuk kamu yang sedang belajar".into(),
+        artist: String::new(),
+        ready: false,
+        audio: false,
+        progress: None,
+        time: String::new(),
+    };
     let video_ready = PlayerView { ready: true, ..video.clone() };
+    let song_loading = PlayerView {
+        name: "@testing".into(),
+        line: "Our Time".into(),
+        artist: "Afrojack, Martin Garrix, David Guetta".into(),
+        audio: true,
+        ..video.clone()
+    };
+    let song = PlayerView { progress: Some(0.38), time: "1:02 / 2:41".into(), ..song_loading.clone() };
     let agent_waiting = Hud::Agent {
         kind: AgentKind::Claude,
         title: "Billing API backfill".into(),
@@ -650,6 +666,9 @@ fn preview_states() {
         State { player: Some(&video), ..State::new("player_video_loading", View::Player, Page::Home) },
         State { player: Some(&video_ready), hovered: Some(Hit::PlayerClose), ..State::new("player_video", View::Player, Page::Home) },
         State { player: Some(&video), theme: Theme::Paper, ..State::new("player_video_paper", View::Player, Page::Home) },
+        State { player: Some(&song_loading), ..State::new("player_song_loading", View::Song, Page::Home) },
+        State { player: Some(&song), ..State::new("player_song", View::Song, Page::Home) },
+        State { player: Some(&song), hovered: Some(Hit::PlayerVideo), theme: Theme::Paper, ..State::new("player_song_paper", View::Song, Page::Home) },
         State { hovered: Some(Hit::GoogleDisconnect), ..State::new("page_mail_hover", View::Panel, Page::Mail) },
         State { mail_setup: true, ..State::new("page_mail_setup", View::Panel, Page::Mail) },
         State { mail_setup: true, mail_editing: Some(0), ..State::new("page_mail_setup_typing", View::Panel, Page::Mail) },
@@ -765,6 +784,7 @@ fn preview_states() {
             },
             tako: &tako_view(&data.tako, state.name),
             player: state.player,
+            player_behind: false,
             agent_scroll: 0,
             welcome: state.welcome,
             settings: if state.name.ends_with("_about") { Settings { updates: true, ..Settings::default() } } else { Settings::default() },
@@ -846,6 +866,7 @@ fn scene_for<'a>(data: &'a Sample, view: View, page: Page, media: bool) -> Scene
         plugins: &data.plugins,
         tako: &data.tako,
         player: None,
+        player_behind: false,
         agent_scroll: 0,
         welcome: false,
         settings: Settings::default(),

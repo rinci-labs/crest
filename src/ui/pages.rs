@@ -115,6 +115,8 @@ impl Renderer {
         let download = s.download.filter(|_| playing.is_none() && timer.is_none());
         match (playing, timer, download, focus) {
             (Some(m), ..) => self.wave(x1 - 22.0, cy, s.seconds, accent(m.accent, p.text), a),
+            // A minimized video plays on: its wave, until a click brings it back.
+            _ if s.player_behind => self.wave(x1 - 22.0, cy, s.seconds, accent(None, p.text), a),
             (None, Some(t), ..) => {
                 self.text(&t.short, &self.fonts.caption_end, rect(x1 - 52.0, 0.0, x1 - 13.0, h), ORANGE, a);
             }
@@ -372,6 +374,10 @@ impl Renderer {
                 let line = if *ahead == 0 { "The azan is now" } else { "Time to get ready" };
                 lines(&title, Some((time, fill, true)), line, p.muted);
             }
+            Hud::Unplayable { name, .. } => {
+                lead(ORANGE, ICON_INFO, INK);
+                lines("Can't play here", None, &format!("{name}'s video · skipped"), p.muted);
+            }
             Hud::Update { version, .. } => {
                 lead(p.accent, ICON_DOWNLOAD, p.on_accent);
                 let line = format!("You have {} · see what's new", crate::feeds::updates::CURRENT);
@@ -427,7 +433,11 @@ impl Renderer {
         let dy = (1.0 - a) * -6.0;
         if let Some(player) = s.player {
             self.set_offset(0.0, dy);
-            self.player_page(s, player, x0, x1, a);
+            if player.audio {
+                self.song_page(s, player, x0, x1, a);
+            } else {
+                self.player_page(s, player, x0, x1, a);
+            }
             self.end_zoom();
             return;
         }
@@ -2228,6 +2238,46 @@ impl Renderer {
         }
     }
 
+    /// The player's buttons, right to left from `r`, as icon buttons the size of a tab key.
+    /// Returns the left edge of the leftmost.
+    fn player_buttons(&self, s: &Scene, r: f32, cy: f32, buttons: &[(Hit, char)], a: f32) -> f32 {
+        let p = &self.pal;
+        let step = tokens::TAB_SLOT + 4.0;
+        let mut cx = r - 10.0;
+        for &(hit, icon) in buttons {
+            let over = s.hovered == Some(hit);
+            self.icon_button(cx, cy, 11.0, over, a);
+            self.glyph(icon, &self.fonts.icon_11, cx, cy, if over { p.text } else { p.soft }, a);
+            self.hit(rect(cx - 12.0, cy - 12.0, cx + 12.0, cy + 12.0), hit);
+            cx -= step;
+        }
+        cx + step - 10.0
+    }
+
+    /// A song share, sound only: its title with Close, Minimize, and Video (to see it after all)
+    /// on the right, the artist and who asked for it with the time played, and the progress bar.
+    fn song_page(&self, s: &Scene, player: &PlayerView, x0: f32, x1: f32, a: f32) {
+        let p = &self.pal;
+        let (l, r) = (x0 + PLAYER_SIDE, x1 - PLAYER_SIDE);
+        let cy = tokens::TABS_Y;
+        let buttons = [(Hit::PlayerClose, ICON_CLOSE), (Hit::PlayerMinimize, ICON_CHEVRON_UP), (Hit::PlayerVideo, ICON_VIDEO)];
+        let text_r = self.player_buttons(s, r, cy, &buttons, a) - 8.0;
+        // The music glyph while it loads, the wave once it plays.
+        if player.progress.is_some() {
+            self.wave(l + 6.0, cy, s.seconds, p.accent, a);
+        } else {
+            self.glyph(ICON_MUSIC, &self.fonts.icon_11, l + 6.0, cy, p.accent, a);
+        }
+        self.text(&player.line, &self.fonts.label, rect(l + 20.0, cy - 9.0, text_r, cy + 9.0), p.text, a);
+        let row = cy + SONG_ROW;
+        let time_w = if player.time.is_empty() { 0.0 } else { self.text_width(&player.time, &self.fonts.caption_end) };
+        self.text(&player.time, &self.fonts.caption_end, rect(r - time_w - 2.0, row - 8.0, r, row + 8.0), p.muted, a);
+        let by = if player.artist.is_empty() { String::new() } else { format!("{} · ", player.artist) };
+        let from = if player.time.is_empty() { format!("{by}from {} · loading…", player.name) } else { format!("{by}from {}", player.name) };
+        self.text(&from, &self.fonts.caption, rect(l + 20.0, row - 8.0, r - time_w - TIGHT, row + 8.0), p.muted, a);
+        self.bar(l + 20.0, r, row + SONG_ROW, player.progress.unwrap_or(0.0), p.accent, a);
+    }
+
     /// The player: who sent the video and what it is in the top row, with Browser and Close on
     /// the right, then the video slot. The video itself is Edge's window, docked over the slot by
     /// the app once the shape has settled; the slot is what shows while it loads or moves.
@@ -2235,16 +2285,8 @@ impl Renderer {
         let p = &self.pal;
         let (l, r) = (x0 + PLAYER_SIDE, x1 - PLAYER_SIDE);
         let cy = tokens::TABS_Y;
-        // Close and Browser on the right, as icon buttons the size of a tab key.
-        let close = (r - 10.0, Hit::PlayerClose, ICON_CLOSE);
-        let browser = (r - 10.0 - tokens::TAB_SLOT - 4.0, Hit::PlayerBrowser, ICON_GLOBE);
-        for (cx, hit, icon) in [close, browser] {
-            let over = s.hovered == Some(hit);
-            self.icon_button(cx, cy, 11.0, over, a);
-            self.glyph(icon, &self.fonts.icon_11, cx, cy, if over { p.text } else { p.soft }, a);
-            self.hit(rect(cx - 12.0, cy - 12.0, cx + 12.0, cy + 12.0), hit);
-        }
-        let text_r = browser.0 - 18.0;
+        let buttons = [(Hit::PlayerClose, ICON_CLOSE), (Hit::PlayerBrowser, ICON_GLOBE), (Hit::PlayerMinimize, ICON_CHEVRON_UP)];
+        let text_r = self.player_buttons(s, r, cy, &buttons, a) - 8.0;
         // A play glyph while the video loads, the music wave once it plays.
         if player.ready {
             self.wave(l + 6.0, cy, s.seconds, p.accent, a);
@@ -2493,7 +2535,6 @@ impl Renderer {
 
     /// Feature switches in two columns of cards. The globe marks the ones that use the internet.
     fn settings_features(&self, s: &Scene, l: f32, r: f32, a: f32) {
-        let p = &self.pal;
         let st = &s.settings;
         let switches: [SettingsSwitch; 8] = [
             ("Lyrics", st.lyrics, true, Command::ToggleLyrics),
@@ -2505,10 +2546,16 @@ impl Renderer {
             ("Plugins", st.plugins, false, Command::TogglePlugins),
             ("Screenshots", st.screenshots, false, Command::ToggleScreenshots),
         ];
+        self.switch_cards(s, l, r, 0, switches, a);
+    }
+
+    /// Switches as cards in two columns, from settings row `first` down.
+    fn switch_cards<const N: usize>(&self, s: &Scene, l: f32, r: f32, first: usize, switches: [SettingsSwitch; N], a: f32) {
+        let p = &self.pal;
         let width = (r - l - TIGHT) / 2.0;
         for (i, (label, on, online, command)) in switches.into_iter().enumerate() {
             let x = l + (i % 2) as f32 * (width + TIGHT);
-            let cy = Self::settings_row_y(i / 2);
+            let cy = Self::settings_row_y(first + i / 2);
             let area = rect(x, cy - SETTINGS_CARD_H / 2.0, x + width, cy + SETTINGS_CARD_H / 2.0);
             let hit = Hit::Command(command);
             self.card(area, tokens::RADIUS_ROW, s.hovered == Some(hit), a);
@@ -2557,7 +2604,7 @@ impl Renderer {
     fn settings_tako(&self, s: &Scene, l: f32, r: f32, a: f32) {
         let p = &self.pal;
         let st = &s.settings;
-        self.settings_row(l, r, 0, false, "Overlay", true, a);
+        self.settings_row(l, r, 0, true, "Overlay", true, a);
         let cy = Self::settings_row_y(0);
         let (label, hit, status) = match (st.tako, s.tako.setup) {
             (false, _) => ("Turn on", Hit::Command(Command::ToggleTako), "Off"),
@@ -2575,9 +2622,13 @@ impl Renderer {
             _ => p.muted,
         };
         self.text(status, &self.fonts.caption_end, rect(l + 90.0, cy - 8.0, chip.left - TIGHT, cy + 8.0), color, a);
-        self.settings_switch(s, l, r, 1, false, ("Donation notices", st.tako_alerts, false, Command::ToggleTakoAlerts), a);
-        self.settings_switch(s, l, r, 2, false, ("Soundboard notices", st.tako_sounds, false, Command::ToggleTakoSounds), a);
-        self.settings_switch(s, l, r, 3, true, ("Show donor messages", st.tako_messages, false, Command::ToggleTakoMessages), a);
+        let switches: [SettingsSwitch; 4] = [
+            ("Donation notices", st.tako_alerts, false, Command::ToggleTakoAlerts),
+            ("Soundboard notices", st.tako_sounds, false, Command::ToggleTakoSounds),
+            ("Donor messages", st.tako_messages, false, Command::ToggleTakoMessages),
+            ("Autoplay videos", st.tako_autoplay, false, Command::ToggleTakoAutoplay),
+        ];
+        self.switch_cards(s, l, r, 1, switches, a);
     }
 
     /// About: the version, the opt-in update check, and what it found, with the next step.
@@ -2735,6 +2786,8 @@ struct Cell<'a> {
 }
 
 /// Where an empty page centres its icon, title, and hint: between the deck's top and the footer.
+/// Distance between the song shape's rows.
+const SONG_ROW: f32 = 22.0;
 const EMPTY_AREA: (f32, f32) = (tokens::DECK_TOP + 12.0, ROW_Y - CONTROL_H / 2.0 - 8.0);
 /// The Google setup boxes and the Connect button under them. These are page coordinates, like
 /// `ROW_Y`; the renderer adds `CONTENT_SHIFT`, so the button's bottom lands at 170 in the panel.

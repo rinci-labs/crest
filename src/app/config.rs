@@ -93,6 +93,8 @@ pub(super) const MESSAGE_HUD_MS: u32 = 5_000;
 pub(super) const MAIL_HUD_MS: u32 = 5_000;
 /// A Tako donation: long enough to read a short message.
 pub(super) const TAKO_HUD_MS: u32 = 7_000;
+/// A video the player could not play: long enough to reach its Open button.
+pub(super) const PLAYER_HUD_MS: u32 = 6_000;
 /// Content fainter than this no longer holds a shrinking shape back.
 pub(super) const HOLD_ALPHA: f32 = 0.04;
 pub(super) const SCREENSHOT_HUD_MS: u32 = 4_000;

@@ -91,6 +91,8 @@ pub enum View {
     PanelTall,
     /// The Tako player: a 16:9 video slot inside the island, the video docked over it.
     Player,
+    /// The Tako player for a song share: sound only, so just its title, sender, and progress.
+    Song,
 }
 
 /// The player shape: its width, the video slot's top and side inset (DIP), and the slot's corner.
@@ -98,6 +100,9 @@ const PLAYER_W: f32 = 600.0;
 const PLAYER_SLOT_TOP: f32 = 38.0;
 const PLAYER_SIDE: f32 = 16.0;
 pub const PLAYER_RADIUS: f32 = tokens::RADIUS_CARD;
+/// The song shape: as wide as a notice card, three rows tall.
+const SONG_W: f32 = 420.0;
+const SONG_H: f32 = 84.0;
 
 /// The video slot of a player shape `width` DIP wide, in canvas coordinates (the canvas is
 /// centred on the shape, so `x` runs from `CANVAS.0 / 2 - width / 2`).
@@ -123,12 +128,13 @@ impl View {
             View::PanelWide => (660.0, tokens::PANEL_H),
             View::PanelTall => (560.0, tokens::PANEL_H + 64.0),
             View::Player => (PLAYER_W, PLAYER_SLOT_TOP + (PLAYER_W - 2.0 * PLAYER_SIDE) * 9.0 / 16.0 + PLAYER_SIDE),
+            View::Song => (SONG_W, SONG_H),
         }
     }
 
     /// Open panel, normal or wide.
     pub const fn is_panel(self) -> bool {
-        matches!(self, View::Panel | View::PanelWide | View::PanelTall | View::Player)
+        matches!(self, View::Panel | View::PanelWide | View::PanelTall | View::Player | View::Song)
     }
 
     /// Index of the content shown in this shape; the thin line holds nothing.
@@ -138,7 +144,7 @@ impl View {
             View::Pill => Some(0),
             View::LyricPill => Some(1),
             View::Hud | View::Card | View::Strip => Some(2),
-            View::Panel | View::PanelWide | View::PanelTall | View::Player => Some(3),
+            View::Panel | View::PanelWide | View::PanelTall | View::Player | View::Song => Some(3),
         }
     }
 }
@@ -178,6 +184,8 @@ pub enum Hud {
     /// A Tako donation: who, what ("Rp 10.000"), the line under it (the message, a media
     /// share's video, or a soundboard sound), and the video to open when clicked.
     Tako { name: String, value: String, line: String, initials: String, url: String },
+    /// A video sent by `name` that the player could not play; clicking opens it in the browser.
+    Unplayable { name: String, url: String },
 }
 
 impl Hud {
@@ -196,6 +204,7 @@ impl Hud {
                 | Hud::Prayer { .. }
                 | Hud::Agent { .. }
                 | Hud::Update { .. }
+                | Hud::Unplayable { .. }
         )
     }
 
@@ -206,6 +215,7 @@ impl Hud {
             Hud::Tako { url, .. } if !url.is_empty() => Some("Play"),
             Hud::Download { .. } => Some("Show"),
             Hud::Update { .. } => Some("View"),
+            Hud::Unplayable { .. } => Some("Open"),
             Hud::Screenshot { .. } => Some("View"),
             Hud::Agent { needs_input: true, pid, .. } => Some(if *pid != 0 { "Switch" } else { "View" }),
             _ => None,
@@ -358,6 +368,10 @@ pub enum Hit {
     TakoSection(TakoSection),
     /// Stop the player and close it.
     PlayerClose,
+    /// Show a song share's video (it plays as sound only at first).
+    PlayerVideo,
+    /// Shrink the player to the pill; the video plays on.
+    PlayerMinimize,
     /// Open the playing video in the browser instead.
     PlayerBrowser,
     /// A row on the Tako page with a link (a media share or a song), by its index in the section.
@@ -682,6 +696,14 @@ pub struct PlayerView {
     pub line: String,
     /// The video is docked over the slot; until then the slot says it is loading.
     pub ready: bool,
+    /// A song's artist; empty for a media share.
+    pub artist: String,
+    /// A song share: drawn as the song shape, with no video.
+    pub audio: bool,
+    /// Share played, 0..1, once the length is known.
+    pub progress: Option<f32>,
+    /// "1:02 / 2:41", or empty before the video starts.
+    pub time: String,
 }
 
 /// A section of the Tako page, chosen in its sidebar; one per overlay Crest reads.
@@ -920,6 +942,8 @@ pub struct Scene<'a> {
     pub tako: &'a TakoView,
     /// The player, while a video plays: drawn instead of the page when the shape is `Player`.
     pub player: Option<&'a PlayerView>,
+    /// A minimized video or a song plays on behind the pill (its wave shows there).
+    pub player_behind: bool,
     /// First agent row shown.
     pub agent_scroll: usize,
     /// The panel holds the first-run welcome instead of a page.
@@ -1101,6 +1125,7 @@ const ICON_KEYBOARD: char = '\u{E765}';
 const ICON_PHONE: char = '\u{E8EA}';
 const ICON_MUSIC: char = '\u{EC4F}';
 const ICON_FOLDER: char = '\u{E8B7}';
+const ICON_VIDEO: char = '\u{E714}';
 const ICON_DOCUMENT: char = '\u{E8A5}';
 const ICON_STOPWATCH: char = '\u{E916}';
 const ICON_REFRESH: char = '\u{E72C}';

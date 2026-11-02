@@ -358,6 +358,8 @@ impl App {
                 self.apply_visibility();
                 self.wake_up();
                 self.rebuild_views();
+                // What arrived while locked plays now.
+                self.play_next();
                 self.refresh();
             }
             _ => {}
