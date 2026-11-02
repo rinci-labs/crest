@@ -396,6 +396,12 @@ impl Renderer {
             self.chip(button, label, Style::Primary, false, a);
             r = button.left - TIGHT;
         }
+        // With a button on the right, a quiet value (the app, the project) would crowd it on the
+        // title line: it leads the second line instead.
+        let (value, line) = match value {
+            Some((quiet, _, false)) if action.is_some() && !quiet.is_empty() => (None, format!("{quiet} · {line}")),
+            _ => (value, line.to_string()),
+        };
         let mut title_r = r;
         // A strong value (an amount, a time) matches the title; a quiet one (the app, the
         // project) is a caption.
@@ -406,7 +412,7 @@ impl Renderer {
             title_r = r - width - TIGHT;
         }
         self.text(title, &self.fonts.label, rect(left, NOTICE_TITLE_Y - 9.0, title_r, NOTICE_TITLE_Y + 9.0), p.text, a);
-        self.text(line, &self.fonts.caption, rect(left, NOTICE_LINE_Y - 8.0, r, NOTICE_LINE_Y + 8.0), line_color, a);
+        self.text(&line, &self.fonts.caption, rect(left, NOTICE_LINE_Y - 8.0, r, NOTICE_LINE_Y + 8.0), line_color, a);
     }
 
     pub(super) fn draw_panel(&self, s: &Scene, x0: f32, x1: f32, a: f32) {
