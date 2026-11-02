@@ -115,6 +115,9 @@ fn run(wake: HANDLE, stop: &AtomicBool, notify: &Notifier) {
         if let Some(rows) = scanner.scan() {
             notify.send(Event::Agents(rows));
         }
+        if let Some(limits) = scanner.scan_limits() {
+            notify.send(Event::AgentLimits(limits));
+        }
         last_scan = Instant::now();
         if watches.stale() {
             watches = Watches::open();

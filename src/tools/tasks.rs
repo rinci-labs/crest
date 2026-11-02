@@ -73,6 +73,15 @@ impl Tasks {
         }
     }
 
+    /// Put task `index` first, so it leads the open tasks.
+    pub fn move_to_top(&mut self, index: usize) {
+        if index < self.items.len() {
+            let task = self.items.remove(index);
+            self.items.insert(0, task);
+            self.scroll = 0;
+        }
+    }
+
     pub fn clear_done(&mut self) {
         self.items.retain(|t| !t.done);
         self.clamp_scroll();

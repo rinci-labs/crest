@@ -57,7 +57,7 @@ use crate::system::power::{self, Power};
 use crate::system::privacy::Usage;
 use crate::ui::{
     self, Button, CONTENTS, CalendarEntry, CalendarView, ControlsView, DayView, Eyes, FocusView, Hit, Hud, LyricsView,
-    MailRow, MailView, MediaView, Mood, PluginsView, PrayerTime, PrayerView, Renderer, Roll, Scene, ShelfFx, TimerView, View, WaterView, hud_value,
+    MailRow, MailView, MediaView, Mood, PluginsView, TakoView, PrayerTime, PrayerView, Renderer, Roll, Scene, ShelfFx, TimerView, View, WaterView, hud_value,
 };
 use crate::system::services::{self, Event, Services, Task};
 use crate::shell::settings::{Messages, Settings, Size};
@@ -91,6 +91,7 @@ mod mascot;
 mod playback;
 mod prayer;
 mod schedule;
+mod tako;
 mod views;
 
 use config::*;
@@ -237,6 +238,12 @@ struct App {
     height: Spring,
     /// Size when the shape transition started, to measure how far it has progressed.
     from: (f32, f32),
+    /// The size each content was last laid out at (see `Scene::layout`).
+    layout: [(f32, f32); CONTENTS],
+    /// A smaller shape waiting for the old content to fade out before it starts to shrink.
+    held: Option<(f32, f32)>,
+    /// The click target the mouse button went down on, shown pressed until it comes up.
+    pressed: Option<Hit>,
     /// Opacity of each content; see [`View::content`].
     alpha: [f32; CONTENTS],
     page: Page,
@@ -394,6 +401,15 @@ struct App {
     /// Watches coding agents while the Agents page is enabled.
     agent_listener: Option<agents::Listener>,
     agent_rows: Vec<agents::Session>,
+    /// The Agents page: its filter, the rows it lists, their counts per filter, the open row,
+    /// and finished rows hidden until they work again (by id).
+    agent_filter: ui::AgentFilter,
+    agent_list: Vec<agents::Session>,
+    agent_counts: [usize; 4],
+    agent_open: Option<String>,
+    agent_dismissed: Vec<String>,
+    /// Plan usage limits the agents recorded, tightest first.
+    agent_limits: Vec<agents::Limits>,
     agent_hooks: agents::HookStatus,
     /// First agent row shown; the rest scroll with the mouse wheel.
     agent_scroll: usize,
@@ -426,6 +442,15 @@ struct App {
     /// The Mail and Plugins pages, built when their data changes rather than on every frame.
     mail_view: MailView,
     plugins_view: PluginsView,
+    /// Tako overlay connection and what it read; the page view is built from it.
+    tako: tako::TakoState,
+    tako_view: TakoView,
+    /// Section open on the Settings page.
+    settings_section: ui::SettingsSection,
+    /// The video playing in the player shape.
+    player: Option<tako::Playing>,
+    /// What the player shape shows; kept while the shape fades out after the video closes.
+    player_view: Option<ui::PlayerView>,
     clock_text: clock_text::ClockText,
 }
 
@@ -454,6 +479,9 @@ impl App {
             width: Spring::new(w, 300.0, 0.74, SHAPE_PRECISION),
             height: Spring::new(h, 300.0, 0.74, SHAPE_PRECISION),
             from: (w, h),
+            layout: [(0.0, 0.0); CONTENTS],
+            held: None,
+            pressed: None,
             alpha: [1.0, 0.0, 0.0, 0.0],
             page: Page::Home,
             page_anim: None,
@@ -551,6 +579,12 @@ impl App {
             agent_listener: None,
             agents_seen: false,
             agent_rows: Vec::new(),
+            agent_filter: ui::AgentFilter::default(),
+            agent_list: Vec::new(),
+            agent_counts: [0; 4],
+            agent_open: None,
+            agent_dismissed: Vec::new(),
+            agent_limits: Vec::new(),
             agent_hooks: agents::installed_hooks(),
             agent_scroll: 0,
             account: None,
@@ -580,6 +614,11 @@ impl App {
                 connecting: false,
             },
             plugins_view: PluginsView { rows: Vec::new(), problems: Vec::new(), count: 0, empty: true },
+            tako: tako::TakoState { has_key: crate::feeds::tako::key().is_some(), ..Default::default() },
+            tako_view: TakoView::default(),
+            settings_section: ui::SettingsSection::default(),
+            player: None,
+            player_view: None,
             clock_text: Default::default(),
         };
         app.services.thumbnails(app.shelf.items.iter().map(|item| (item.id, item.path.clone())).collect());
@@ -664,6 +703,8 @@ impl App {
 
 impl Drop for App {
     fn drop(&mut self) {
+        // Edge's window would otherwise stay on screen, docked over nothing.
+        self.close_player();
         unsafe {
             let _ = WTSUnRegisterSessionNotification(self.hwnd);
             let _ = UnregisterHotKey(Some(self.hwnd), HOTKEY_ID);
@@ -783,6 +824,8 @@ enum Field {
     GoogleId,
     /// Google client secret on the Mail page.
     GoogleSecret,
+    /// Overlay link on the Tako page.
+    TakoKey,
 }
 
 /// Today's date.

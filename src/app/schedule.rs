@@ -63,6 +63,7 @@ impl App {
                 self.refresh();
             }
             TIMER_WEATHER => self.fetch_weather(),
+            TIMER_PLAYER => self.on_player_timer(),
             TIMER_CALENDARS => {
                 self.kill_timer(TIMER_CALENDARS);
                 self.fetch_calendars();
@@ -159,6 +160,10 @@ impl App {
     }
 
     pub(super) fn on_clock(&mut self) {
+        // The Tako timer is shown to the minute, so its text follows the clock.
+        if self.tako.countdown.is_some() {
+            self.rebuild_views();
+        }
         debug_log!(
             "last minute: hook callbacks {}, animation frames {}",
             desktop::take_callback_count(),

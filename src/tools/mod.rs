@@ -33,13 +33,15 @@ pub enum Page {
     Mail,
     /// Rows produced by local plugin commands.
     Plugins,
+    /// Donations, leaderboard, and goal from the creator's Tako overlay.
+    Tako,
     /// Theme, size, and feature switches. Opened from the gear at the end of the tab bar; not
     /// in [`Page::ALL`], so it cannot be hidden or moved and is never stepped through.
     Settings,
 }
 
 impl Page {
-    pub const ALL: [Page; 12] = [
+    pub const ALL: [Page; 13] = [
         Page::Home,
         Page::Controls,
         Page::Shelf,
@@ -52,6 +54,7 @@ impl Page {
         Page::Agents,
         Page::Mail,
         Page::Plugins,
+        Page::Tako,
     ];
 
     /// Name shown in menus.
@@ -69,6 +72,7 @@ impl Page {
             Page::Agents => "Agents",
             Page::Mail => "Mail",
             Page::Plugins => "Plugins",
+            Page::Tako => "Tako",
             Page::Settings => "Settings",
         }
     }
@@ -88,6 +92,7 @@ impl Page {
             Page::Agents => "agents",
             Page::Mail => "mail",
             Page::Plugins => "plugins",
+            Page::Tako => "tako",
             Page::Settings => "settings",
         }
     }
@@ -96,10 +101,10 @@ impl Page {
 /// Page order and which pages are hidden. Home is always shown.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Pages {
-    order: [Page; 12],
+    order: [Page; 13],
     /// One bit per page, in [`Page::ALL`] order.
     hidden: u16,
-    /// Pages whose feature is switched off (Mail, Plugins): kept off the tab bar so it only
+    /// Pages whose feature is switched off (Mail, Plugins, Tako): kept off the tab bar so it only
     /// carries pages that do something, but still "shown" in the Pages menu. Not saved; it
     /// follows the feature switches (see `Settings::sync_pages`).
     off: u16,
@@ -113,7 +118,7 @@ impl Default for Pages {
 
 impl Pages {
     /// All pages in the user's order, including hidden ones.
-    pub fn order(&self) -> [Page; 12] {
+    pub fn order(&self) -> [Page; 13] {
         self.order
     }
 
@@ -234,8 +239,8 @@ mod tests {
     #[test]
     fn pages_wrap_around() {
         let pages = Pages::default();
-        assert_eq!(pages.step(Page::Home, -1), Page::Plugins);
-        assert_eq!(pages.step(Page::Plugins, 1), Page::Home);
+        assert_eq!(pages.step(Page::Home, -1), Page::Tako);
+        assert_eq!(pages.step(Page::Tako, 1), Page::Home);
         assert_eq!(pages.step(Page::Shelf, 1), Page::Focus);
     }
 
@@ -247,7 +252,7 @@ mod tests {
         assert!(pages.shown(Page::Home), "home is always shown");
         assert_eq!(pages.step(Page::Timer, 1), Page::Prayer, "Timer steps on from its shared tab");
         assert_eq!(pages.tab(Page::Timer), Page::Focus);
-        assert_eq!(pages.visible().count(), 10);
+        assert_eq!(pages.visible().count(), 11);
 
         pages.move_by(Page::System, -1);
         assert_eq!(
@@ -263,22 +268,23 @@ mod tests {
                 Page::Agents,
                 Page::Mail,
                 Page::Plugins,
+                Page::Tako,
             ]
         );
         assert!(!pages.can_move(Page::Home, -1));
-        assert!(!pages.can_move(Page::Plugins, 1));
+        assert!(!pages.can_move(Page::Tako, 1));
         assert!(pages.can_move(Page::Tasks, 1), "tasks still has a neighbour on the right");
 
         assert_eq!(Pages::parse(&pages.to_text()), pages);
-        assert_eq!(pages.to_text(), "home,controls,shelf,focus,timer,-water,prayer,system,tasks,agents,mail,plugins");
+        assert_eq!(pages.to_text(), "home,controls,shelf,focus,timer,-water,prayer,system,tasks,agents,mail,plugins,tako");
         // Unknown names are skipped; pages not mentioned are appended at the end.
         let partial = Pages::parse("tasks, junk, -shelf");
         assert_eq!(partial.order()[0], Page::Tasks);
         assert!(!partial.shown(Page::Shelf));
-        assert_eq!(partial.visible().count(), 10);
+        assert_eq!(partial.visible().count(), 11);
         // Older settings (from before newer pages existed) still parse; new pages show at the end.
         let old = Pages::parse("home,shelf,focus,water,tasks,system");
-        assert_eq!(old.order()[6..], [Page::Controls, Page::Timer, Page::Prayer, Page::Agents, Page::Mail, Page::Plugins]);
+        assert_eq!(old.order()[6..], [Page::Controls, Page::Timer, Page::Prayer, Page::Agents, Page::Mail, Page::Plugins, Page::Tako]);
         assert!(old.shown(Page::Timer));
         // With Focus hidden, Timer gets a tab of its own again.
         let mut alone = Pages::default();

@@ -37,7 +37,7 @@ Before calling work done: `cargo build` and `cargo test` must pass without error
 | `src/ui/motion.rs` | Spring animation |
 | `src/ui/tests.rs` | Renderer tests and `target/preview` images |
 | `src/tools/` | Page logic: agenda, focus, shelf, tasks, timer, water; `Page`/`Pages` in `mod.rs` |
-| `src/feeds/` | Media sessions, lyrics, weather, incoming messages; `agents/` has one reader per coding agent, shared `util.rs`, and the folder `listener.rs` |
+| `src/feeds/` | Media sessions, lyrics, weather, incoming messages, Google, plugins, Tako; `agents/` has one reader per coding agent, shared `util.rs`, and the folder `listener.rs` |
 | `src/system/` | Windows wrappers and the background service thread (`services.rs`) |
 | `src/shell/` | Install, identity package, autostart, tray, settings, storage, error log |
 | `packaging/` | Manifest (`crest.exe.manifest`), icon (`crest.ico`), identity package, update and logo scripts |
@@ -55,8 +55,8 @@ Before calling work done: `cargo build` and `cargo test` must pass without error
 - **Logging:** `debug_log!` is for debug builds only. `error_log!` is also written in release
   builds, so **never** include message content, track titles, file names, folder names, or any
   other user data.
-- **Network:** only lyrics (LRCLIB) and weather (Open-Meteo), both off by default. New features
-  must not send data out without the user's explicit consent.
+- **Network:** lyrics (LRCLIB), weather (Open-Meteo), calendar feeds, Google, and Tako, each off
+  by default. New features must not send data out without the user's explicit consent.
 - **User data:** stored as plain text files in `%APPDATA%\Crest` so it can be read with Notepad.
   Do not use binary formats or databases.
 - **External-file scanners** (such as `feeds/agents/`): read small files only, bound the read size,

@@ -5,8 +5,45 @@ and versions follow [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+### Added
+
+- Tako page and notices: paste any overlay link from the Tako dashboard. Donations, media
+  shares (with the video to open), and soundboard sounds arrive as notices; the page, on the large
+  panel, has a section per overlay: Recent, Leaderboard, Milestone, Song share, Poll, Timer, and
+  VIP queue. Settings → Tako picks which donations notify and whether messages show. Read-only
+  (OBS still plays everything), off by default, and the key is DPAPI-encrypted.
+- Media shares and song requests play inside the island: it grows into a 16:9 player with the
+  sender, Browser, and Close, and the video (Microsoft Edge in app mode, InPrivate, video only,
+  starting at once) is docked into it. YouTube, TikTok, and Instagram links only.
+- Agents page shows plan usage limits: each window (5 hours, week) as a small bar with its
+  share, amber from 75% and red from 90%, and the time until it resets when one is used up or on hover.
+  Codex is read from its rollout files; Claude Code through the opt-in `crest.exe --statusline`
+  relay, which passes the input on to your own status line command. Home gets a glance chip when
+  an agent passes 75%.
+
 ### Changed
 
+- Notices come in two sizes: one-line notices (volume, locks, power, focus, water, timer) stay
+  320 × 42; two-line notices (messages, mail, Tako, agents, downloads, screenshots, Wi-Fi,
+  Bluetooth, agenda, prayer) use a 400 × 58 card with room to breathe and the notice's action as
+  a button: Open, Play, Show, View, or Switch.
+- Shapes no longer squeeze their content while they move: content keeps its layout and the shape
+  clips it, and a shape that gets smaller waits for its content to fade out first.
+- Everything clickable shows a pressed state while the mouse button is held on it.
+- Agents page moves to the large panel: plan limits for every agent in a left column, filter keys
+  (All, Waiting, Working, Done) with counts, a banner while a plan is used up, and rows that open
+  in place with Switch, Folder, and Dismiss.
+- Setup boxes (Google, Tako) have a Paste button while empty, a green check or a red outline once
+  filled, a one-line reason when the input is wrong, and Connect stays dimmed until it can work.
+  The Google client secret is drawn as dots, typed or not.
+- Tasks: hovering a row offers Move to top beside Delete.
+- Lyrics: placeholder lines while searching, and "No lyrics for this track" when there are none.
+- Plugins: a failed plugin has Retry on its row; the empty page can add the example plugin.
+- The welcome is three switches (Lyrics, Calendar, Agents) and Get started; the lock screen's tab
+  row says "Locked".
+- Settings is a settings window: a sidebar of sections (Appearance, Features, Prayer, Agents)
+  beside one titled group of rows, on a 560 × 256 panel. New on it: notification sounds,
+  compact indicators, screenshots to shelf, the prayer reminder, agent notices, and Tako.
 - Focus and Timer share one tab with a Focus | Timer switch; the tab bar is down to nine pages
   and the gear on a fresh install.
 - Every notice that is not a reaction to your own key press now has a sound: screenshots saved
@@ -31,6 +68,8 @@ and versions follow [Semantic Versioning](https://semver.org).
 
 ### Fixed
 
+- Showing or hiding the Mail or Plugins page from the tray's Pages menu changed the size instead:
+  their menu ids overlapped the Size menu's.
 - Mail rows no longer overlap, and only the row under the cursor lights up.
 - Controls keeps even gaps without a brightness slider: sliders and tiles are one centred block.
 - Empty pages are one centred block (icon on a soft disc, title, hint, then the action), and

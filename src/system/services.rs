@@ -56,12 +56,16 @@ pub enum Event {
     Weather(Option<weather::Weather>),
     /// Coding agent rows changed (see [`crate::feeds::agents::Listener`]).
     Agents(Vec<crate::feeds::agents::Session>),
+    /// Plan usage limits of the coding agents changed (see [`crate::feeds::agents::Limits`]).
+    AgentLimits(Vec<crate::feeds::agents::Limits>),
     /// Google sign-in finished, or fresh mail and calendar data arrived.
     Google(std::result::Result<crate::feeds::google::Outcome, String>),
     /// Plugin output, by plugin name.
     Plugin(String, crate::feeds::plugins::Output),
     /// One calendar feed was fetched (or failed).
     Calendar(crate::tools::feeds::Fetched),
+    /// A donation, widget state, or connection change from the Tako overlay.
+    Tako(crate::feeds::tako::Update),
 }
 
 /// Work for the service thread.

@@ -148,6 +148,13 @@ pub struct Settings {
     pub mail: bool,
     /// Run the commands in the plugins folder while the Plugins page is open.
     pub plugins: bool,
+    /// Donations from the creator's Tako overlay (uses the internet). Off by default.
+    pub tako: bool,
+    /// Tako donations and media shares, and soundboard sounds, arrive as notices.
+    pub tako_alerts: bool,
+    pub tako_sounds: bool,
+    /// Tako notices show the donor's message; off leaves the name and amount.
+    pub tako_messages: bool,
     /// Lyrics column beside the music player (lyrics button in the panel). Only applies when
     /// `lyrics` is on.
     pub lyric_panel: bool,
@@ -172,9 +179,10 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         let mut pages = Pages::default();
-        // Mail and Plugins are off by default, so their tabs start off the bar too.
+        // Mail, Plugins, and Tako are off by default, so their tabs start off the bar too.
         pages.set_feature(crate::tools::Page::Mail, false);
         pages.set_feature(crate::tools::Page::Plugins, false);
+        pages.set_feature(crate::tools::Page::Tako, false);
         Self {
             sound: true,
             lyrics: false,
@@ -192,6 +200,10 @@ impl Default for Settings {
             google_calendar: false,
             mail: false,
             plugins: false,
+            tako: false,
+            tako_alerts: true,
+            tako_sounds: true,
+            tako_messages: true,
             lyric_panel: false,
             messages: Messages::default(),
             hide_content: false,
@@ -227,6 +239,7 @@ impl Settings {
     pub fn sync_pages(&mut self) {
         self.pages.set_feature(crate::tools::Page::Mail, self.mail);
         self.pages.set_feature(crate::tools::Page::Plugins, self.plugins);
+        self.pages.set_feature(crate::tools::Page::Tako, self.tako);
     }
 
     fn parse(lines: &[String]) -> Self {
@@ -251,6 +264,10 @@ impl Settings {
                 "google-calendar" => settings.google_calendar = yes,
                 "mail" => settings.mail = yes,
                 "plugins" => settings.plugins = yes,
+                "tako" => settings.tako = yes,
+                "tako-alerts" => settings.tako_alerts = yes,
+                "tako-sounds" => settings.tako_sounds = yes,
+                "tako-messages" => settings.tako_messages = yes,
                 "lyric-panel" => settings.lyric_panel = yes,
                 "welcomed" => settings.welcomed = yes,
                 "pages" => settings.pages = Pages::parse(value),
@@ -312,6 +329,10 @@ impl Settings {
             format!("google-calendar={}", yes(self.google_calendar)),
             format!("mail={}", yes(self.mail)),
             format!("plugins={}", yes(self.plugins)),
+            format!("tako={}", yes(self.tako)),
+            format!("tako-alerts={}", yes(self.tako_alerts)),
+            format!("tako-sounds={}", yes(self.tako_sounds)),
+            format!("tako-messages={}", yes(self.tako_messages)),
             format!("lyric-panel={}", yes(self.lyric_panel)),
             format!("messages={}", self.messages.key()),
             format!("hide-content={}", yes(self.hide_content)),
@@ -352,6 +373,10 @@ mod tests {
             google_calendar: true,
             mail: true,
             plugins: true,
+            tako: true,
+            tako_alerts: false,
+            tako_sounds: true,
+            tako_messages: false,
             lyric_panel: true,
             messages: Messages::AllChat,
             hide_content: true,

@@ -40,20 +40,29 @@ impl App {
         // A thin line when the active window is maximized, also while the camera/mic is in use
         // (its privacy dot shows at the end of the line). A line touched by the cursor turns back into a pill first.
         let slim = self.mode == Mode::Maximized && !self.locked && !self.peek;
-        if self.expanded {
+        // A playing video holds the shape until it is closed; the lock screen keeps it hidden.
+        if self.player.is_some() && !self.locked {
+            View::Player
+        } else if self.expanded {
             // Wide Home with the calendar (not on the lock screen: the agenda is private), or
             // with the lyrics column beside the player.
             let calendar = self.settings.calendar && !self.locked;
             let wide = self.page == Page::Home && (calendar || self.lyric_column()) && !self.welcome;
             if wide {
                 View::PanelWide
-            } else if self.page == Page::Settings && !self.welcome {
+            } else if matches!(self.page, Page::Settings | Page::Tako | Page::Agents) && !self.welcome {
                 View::PanelTall
             } else {
                 View::Panel
             }
         } else if self.hud_visible {
-            if self.compact_hud() { View::Strip } else { View::Hud }
+            if self.compact_hud() {
+                View::Strip
+            } else if self.hud.as_ref().is_some_and(Hud::card) {
+                View::Card
+            } else {
+                View::Hud
+            }
         } else if slim {
             View::Slim
         } else if self.playing() && self.lyric_line().is_some() {
@@ -73,18 +82,34 @@ impl App {
             let bounce = if opening { OPEN_BOUNCE } else { CLOSE_BOUNCE };
             self.width.set_damping_ratio(bounce);
             self.height.set_damping_ratio(bounce);
+            // A shape that gets smaller waits for its content to fade out first: shrinking under
+            // visible text would squeeze it. Panel to panel keeps its content, so it never waits.
+            let shrinking = target.0 < self.width.value - 1.0 || target.1 < self.height.value - 1.0;
+            let shown = self.view.content().is_some_and(|i| self.alpha[i] > HOLD_ALPHA);
+            let panels = self.view.is_panel() && view.is_panel();
+            let hold = shrinking && !panels && (view != self.view && shown || self.held.is_some());
             if view != self.view {
                 debug_log!("shape: {:?} -> {view:?}", self.view);
                 self.from = (self.width.value, self.height.value);
-                self.panel_resize = self.view.is_panel() && view.is_panel();
+                self.panel_resize = panels;
             } else if self.transition() >= 1.0 {
                 // Only the size changed (new lyric line): the content does not need to fade.
                 self.from = target;
             }
+            if let Some(i) = view.content() {
+                self.layout[i] = target;
+            }
             self.view = view;
             self.target = target;
-            self.width.target = target.0;
-            self.height.target = target.1;
+            if hold {
+                self.held = Some(target);
+                self.width.target = self.width.value;
+                self.height.target = self.height.value;
+            } else {
+                self.held = None;
+                self.width.target = target.0;
+                self.height.target = target.1;
+            }
         }
         // The lyrics column only slides while the panel is open; when closed it snaps into place.
         if !self.expanded {
@@ -92,6 +117,7 @@ impl App {
         }
         self.update_ambient();
         self.update_system_watch();
+        self.dock_player();
         if !self.animating() {
             self.redraw();
         }
@@ -102,6 +128,10 @@ impl App {
         self.view = self.wanted_view();
         let (w, h) = self.view_size(self.view);
         self.target = (w, h);
+        self.held = None;
+        if let Some(i) = self.view.content() {
+            self.layout[i] = (w, h);
+        }
         self.width.snap(w);
         self.height.snap(h);
         self.from = (w, h);
@@ -261,9 +291,16 @@ impl App {
         goals
     }
 
+    /// Content other than the current shape's is still visible.
+    fn content_fading(&self) -> bool {
+        let current = self.view.content();
+        self.alpha.iter().enumerate().any(|(i, a)| Some(i) != current && *a > HOLD_ALPHA)
+    }
+
     pub(super) fn animating(&self) -> bool {
         self.shown
-            && (self.width.is_moving()
+            && (self.held.is_some()
+                || self.width.is_moving()
                 || self.height.is_moving()
                 || self.alpha != self.alpha_goals()
                 || self.blink_since.is_some()
@@ -277,7 +314,11 @@ impl App {
                 || self.wake.is_some()
                 || self.lyric_mix != self.lyric_goal()
                 || self.lyric_scroll.is_some()
-                || self.hover_mix < 1.0)
+                || self.hover_mix < 1.0
+                // The player's loading dots pulse until Edge's window covers the slot. Once the
+                // video plays, the shape is left alone: a full redraw under it every frame would
+                // only cost CPU.
+                || self.player_view.as_ref().is_some_and(|view| !view.ready))
     }
 
     /// Call before changing an animation target, so the first frame does not jump.
@@ -308,6 +349,15 @@ impl App {
         for (alpha, goal) in self.alpha.iter_mut().zip(goals) {
             let tau = if goal > *alpha { 0.08 } else { 0.05 };
             ease(alpha, goal, dt, tau, 0.004);
+        }
+        // The old content has gone: the shape may shrink now.
+        if let Some((w, h)) = self.held
+            && !self.content_fading()
+        {
+            self.held = None;
+            self.from = (self.width.value, self.height.value);
+            self.width.target = w;
+            self.height.target = h;
         }
         if self.blink_since.is_some_and(|start| now - start >= BLINK_SECS) {
             self.blink_since = None;
@@ -357,6 +407,15 @@ impl App {
                 self.gaze = self.gaze_target;
             }
         }
+        // The player page stays until the shape has faded it out, so closing does not flash
+        // a panel page; a panel opened meanwhile drops it at once.
+        if self.player.is_none()
+            && self.player_view.is_some()
+            && (self.view.is_panel() || View::Player.content().is_some_and(|i| self.alpha[i] == 0.0))
+        {
+            self.player_view = None;
+        }
+        self.dock_player();
         if eyes_only && self.shown {
             let result = self
                 .renderer
@@ -404,6 +463,8 @@ impl App {
             width: self.width.value,
             height: self.height.value,
             alpha: self.alpha,
+            layout: self.layout,
+            pressed: self.pressed,
             eyes: self.eyes(),
             shadow: self.shadow,
             time: &self.clock_text.time,
@@ -446,13 +507,22 @@ impl App {
             calendar: calendar.as_ref(),
             agenda_draft: self.agenda.draft.as_deref(),
             agents: &self.agent_rows,
+            agent_list: &self.agent_list,
+            agent_counts: self.agent_counts,
+            agent_filter: self.agent_filter,
+            agent_open: self.agent_open.as_ref().and_then(|id| self.agent_list.iter().position(|row| &row.id == id)),
             agent_hooks: self.agent_hooks,
+            agent_limits: &self.agent_limits,
+            unix: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |time| time.as_secs()),
             mail: &self.mail_view,
             plugins: &self.plugins_view,
+            tako: &self.tako_view,
+            player: self.player_view.as_ref(),
             agent_scroll: self.agent_scroll,
             download: download.as_deref(),
             welcome: self.welcome && self.expanded && !self.locked,
             settings: self.settings,
+            settings_section: self.settings_section,
         };
         let result = self.renderer.draw(&scene).and_then(|_| self.renderer.present(self.hwnd, self.window_pos(), None));
         if let Err(e) = result {

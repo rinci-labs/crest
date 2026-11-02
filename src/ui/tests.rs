@@ -3,7 +3,10 @@ use std::path::{Path, PathBuf};
 use super::*;
 use crate::tools::shelf::Shelf;
 use crate::tools::tasks::Tasks;
-use crate::feeds::agents::{Kind as AgentKind, State as AgentState};
+use crate::feeds::agents::{Kind as AgentKind, Limits, Meter, State as AgentState};
+
+/// Wall clock of the sample data, for reset countdowns.
+const SAMPLE_NOW: u64 = 1_800_000_000;
 
 /// Sample data for every page.
 struct Sample {
@@ -19,8 +22,25 @@ struct Sample {
     controls: ControlsView,
     shelf_fx: ShelfFx,
     agents: Vec<crate::feeds::agents::Session>,
+    limits: Vec<Limits>,
     mail: MailView,
     plugins: PluginsView,
+    tako: TakoView,
+}
+
+/// Sessions per Agents filter key, as the app counts them.
+fn agent_counts(rows: &[crate::feeds::agents::Session]) -> [usize; 4] {
+    AgentFilter::ALL.map(|filter| rows.iter().filter(|row| filter.keeps(row.state)).count())
+}
+
+/// The rows a filter keeps.
+fn agent_list(rows: &[crate::feeds::agents::Session], filter: AgentFilter) -> Vec<crate::feeds::agents::Session> {
+    rows.iter().filter(|row| filter.keeps(row.state)).cloned().collect()
+}
+
+/// The filter a preview's name asks for ("page_agents_waiting").
+fn agent_filter(name: &str) -> AgentFilter {
+    if name.ends_with("_waiting") { AgentFilter::Waiting } else { AgentFilter::All }
 }
 
 fn agent(id: &str, kind: AgentKind, title: &str, project: &str, state: AgentState, detail: &str, age_secs: u64) -> crate::feeds::agents::Session {
@@ -32,8 +52,8 @@ fn agent(id: &str, kind: AgentKind, title: &str, project: &str, state: AgentStat
         state,
         detail: detail.into(),
         age_secs,
-        pid: 0,
-        folder: String::new(),
+        pid: 4242,
+        folder: format!("C:\\work\\{project}"),
     }
 }
 
@@ -99,6 +119,13 @@ fn sample() -> Sample {
             agent("omp:4", AgentKind::Omp, "Write release notes", "crest", AgentState::Done, "", 180),
             agent("copilot:5", AgentKind::Copilot, "Fix flaky upload test", "media-service", AgentState::Idle, "", 1_500),
         ],
+        limits: vec![Limits {
+            kind: AgentKind::Codex,
+            meters: vec![
+                Meter { window: "5h".into(), used: 92, resets_at: SAMPLE_NOW + 2 * 3_600 + 14 * 60 },
+                Meter { window: "Week".into(), used: 41, resets_at: SAMPLE_NOW + 3 * 86_400 },
+            ],
+        }],
         controls: ControlsView {
             volume: Some((0.62, false)),
             brightness: Some(70),
@@ -130,6 +157,69 @@ fn sample() -> Sample {
             count: 2,
             empty: false,
         },
+        tako: TakoView {
+            status: "Live".into(),
+            live: true,
+            gifts: vec![
+                TakoRow {
+                    name: "Ana Putri".into(),
+                    value: "Rp 25.000".into(),
+                    message: "Semangat streamnya kak!".into(),
+                    initials: "AP".into(),
+                    url: String::new(),
+                },
+                TakoRow {
+                    name: "Budi".into(),
+                    value: "Rp 50.000".into(),
+                    message: "YouTube · Lagu favorit buat nemenin main".into(),
+                    initials: "B".into(),
+                    url: "https://www.youtube.com/watch?v=mm0YkIJZJ4w".into(),
+                },
+                TakoRow { name: "@rafaar".into(), value: "5× Mawar".into(), message: "Sent a donation".into(), initials: "R".into(), url: String::new() },
+                TakoRow { name: "Sinta".into(), value: "Rp 10.000".into(), message: "Played “Airhorn”".into(), initials: "S".into(), url: String::new() },
+            ],
+            songs: vec![
+                TakoRow {
+                    name: "Sial".into(),
+                    value: "4:12".into(),
+                    message: "Mahalini · from Ana Putri".into(),
+                    url: "https://www.youtube.com/watch?v=a".into(),
+                    ..TakoRow::default()
+                },
+                TakoRow { name: "Tak Segampang Itu".into(), value: "3:41".into(), message: "Anggi Marito · from Budi".into(), ..TakoRow::default() },
+            ],
+            poll: vec![
+                ("Main Valorant".into(), "Rp 150.000".into(), 0.6),
+                ("Main Minecraft".into(), "Rp 75.000".into(), 0.3),
+                ("Just chatting".into(), "Rp 25.000".into(), 0.1),
+            ],
+            timer: Some(("1 h 12 min".into(), "left on the stream timer".into())),
+            vips: vec![TakoRow { name: "Ilham".into(), value: "Rp 100.000".into(), message: "Game ID: 1234 · Server: Asia".into(), ..TakoRow::default() }],
+            board: vec![
+                ("@rafaar".into(), "Rp 12.522.500".into()),
+                ("Bagas".into(), "Rp 350.000".into()),
+                ("Ilham".into(), "Rp 350.000".into()),
+            ],
+            goal: Some(TakoGoal { title: "New microphone".into(), current: "Rp 60.000".into(), target: "Rp 1.200.000".into(), fraction: 0.05 }),
+            ..TakoView::default()
+        },
+    }
+}
+
+/// The Settings section a preview's name asks for: `_features`, `_prayer`, or `_agents`.
+fn settings_section(name: &str) -> SettingsSection {
+    SettingsSection::ALL.into_iter().find(|s| name.ends_with(&format!("_{}", s.label().to_lowercase()))).unwrap_or_default()
+}
+
+/// The Tako page variant a preview's name asks for: a section ("page_tako_poll"), `_empty`, or
+/// `_setup`.
+fn tako_view(sample: &TakoView, name: &str) -> TakoView {
+    let key = |s: TakoSection| format!("_{}", s.label().to_lowercase().replace(' ', "_"));
+    let section = TakoSection::ALL.into_iter().find(|s| name.ends_with(&key(*s))).unwrap_or_default();
+    match name {
+        _ if name.ends_with("_setup") => TakoView { setup: true, ..TakoView::default() },
+        _ if name.ends_with("_empty") => TakoView { status: "Connecting…".into(), ..TakoView::default() },
+        _ => TakoView { section, ..sample.clone() },
     }
 }
 
@@ -190,6 +280,8 @@ struct State<'a> {
     lyrics_button: Option<bool>,
     welcome: bool,
     agents: bool,
+    /// Plan usage meters on the Agents page and Home.
+    limits: bool,
     /// Mail page without an account: the setup boxes.
     mail_setup: bool,
     /// Which setup box is being typed into.
@@ -198,6 +290,8 @@ struct State<'a> {
     plugins_empty: bool,
     /// Plugins page where one plugin failed.
     plugins_failed: bool,
+    /// The Tako player shape instead of the page.
+    player: Option<&'a PlayerView>,
 }
 
 impl<'a> State<'a> {
@@ -231,10 +325,12 @@ impl<'a> State<'a> {
             lyrics_button: None,
             welcome: false,
             agents: false,
+            limits: false,
             mail_setup: false,
             mail_editing: None,
             plugins_empty: false,
             plugins_failed: false,
+            player: None,
         }
     }
 }
@@ -323,6 +419,20 @@ fn preview_states() {
     let brightness = Hud::Brightness { level: 0.7 };
     let caps = Hud::LockKey { caps: true, on: true };
     let num = Hud::LockKey { caps: false, on: false };
+    let tako_hud = Hud::Tako {
+        name: "Ana Putri".into(),
+        value: "Rp 25.000".into(),
+        line: "Semangat streamnya kak, sehat selalu!".into(),
+        initials: "AP".into(),
+        url: String::new(),
+    };
+    let tako_media = Hud::Tako {
+        name: "Budi".into(),
+        value: "Rp 50.000".into(),
+        line: "YouTube · Lagu favorit buat nemenin main".into(),
+        initials: "B".into(),
+        url: "https://www.youtube.com/watch?v=mm0YkIJZJ4w".into(),
+    };
     let message = Hud::Message {
         app: "WhatsApp".into(),
         aumid: "sample!App".into(),
@@ -340,6 +450,18 @@ fn preview_states() {
     few_pages.set_shown(Page::System, false);
     few_pages.move_by(Page::Tasks, -1);
     let timer_done = Hud::Timer { minutes: 5 };
+    let used_up = vec![
+        Limits {
+            kind: AgentKind::Claude,
+            meters: vec![
+                Meter { window: "5h".into(), used: 100, resets_at: SAMPLE_NOW + 72 * 60 },
+                Meter { window: "Week".into(), used: 64, resets_at: SAMPLE_NOW + 2 * 86_400 },
+            ],
+        },
+        data.limits[0].clone(),
+    ];
+    let video = PlayerView { name: "Budi Santoso".into(), line: "YouTube · Lagu untuk kamu yang sedang belajar".into(), ready: false };
+    let video_ready = PlayerView { ready: true, ..video.clone() };
     let agent_waiting = Hud::Agent {
         kind: AgentKind::Claude,
         title: "Billing API backfill".into(),
@@ -388,7 +510,7 @@ fn preview_states() {
     other_day.events.clear();
     let lyrics = sample_lyrics(1.0);
     let lyrics_scrolling = sample_lyrics(0.4);
-    let searching = LyricsView { lines: Default::default(), scroll: 1.0, status: Some("Searching for lyrics…") };
+    let searching = LyricsView { lines: Default::default(), scroll: 1.0, status: Some(LyricStatus::Searching) };
     let seeking = MediaView { seeking: true, progress: Some(0.62), elapsed: "1:46".into(), remaining: "-1:07".into(), ..sample().media };
     let agenda_due = Hud::Agenda { text: "Team meeting".into(), time: "09.00".into() };
     let prayer_soon = Hud::Prayer { name: "Asr", time: "14:51".into(), ahead: 10 };
@@ -410,7 +532,7 @@ fn preview_states() {
         State { media: true, lyric: Some(lyric), ..State::new("pill_lyric", View::LyricPill, Page::Home) },
         State::new("slim", View::Slim, Page::Home),
         State { hud: Some(&volume), ..State::new("hud_volume", View::Hud, Page::Home) },
-        State { hud: Some(&bluetooth), ..State::new("hud_bluetooth", View::Hud, Page::Home) },
+        State { hud: Some(&bluetooth), ..State::new("hud_bluetooth", View::Card, Page::Home) },
         State { hud: Some(&water_hud), ..State::new("hud_water", View::Hud, Page::Home) },
         State { hud: Some(&camera), ..State::new("hud_camera", View::Hud, Page::Home) },
         State { hovered: Some(Hit::PageDot(Page::Tasks)), ..State::new("page_clock", View::Panel, Page::Home) },
@@ -431,18 +553,27 @@ fn preview_states() {
         State { hovered: Some(Hit::WaterDrink), ..State::new("page_water", View::Panel, Page::Water) },
         State { hovered: Some(Hit::TaskToggle(0)), ..State::new("page_tasks", View::Panel, Page::Tasks) },
         State::new("page_system", View::Panel, Page::System),
-        State { agents: true, ..State::new("page_agents", View::Panel, Page::Agents) },
-        State { agents: true, hovered: Some(Hit::AgentRow(0)), ..State::new("page_agents_hover", View::Panel, Page::Agents) },
-        State { agents: true, hovered: Some(Hit::AgentRow(1)), ..State::new("page_agents_row", View::Panel, Page::Agents) },
+        State { agents: true, ..State::new("page_agents", View::PanelTall, Page::Agents) },
+        State { agents: true, hovered: Some(Hit::AgentRow(0)), ..State::new("page_agents_hover", View::PanelTall, Page::Agents) },
+        State { agents: true, hovered: Some(Hit::AgentSwitch(0)), ..State::new("page_agents_open", View::PanelTall, Page::Agents) },
+        State { agents: true, ..State::new("page_agents_waiting", View::PanelTall, Page::Agents) },
+        State { agents: true, limits: true, ..State::new("page_agents_limits", View::PanelTall, Page::Agents) },
+        State { agents: true, limits: true, hovered: Some(Hit::AgentLimits), ..State::new("page_agents_limits_hover", View::PanelTall, Page::Agents) },
+        State { agents: true, limits: true, ..State::new("page_agents_used_up", View::PanelTall, Page::Agents) },
+        State { limits: true, ..State::new("page_agents_empty_limits", View::PanelTall, Page::Agents) },
+        State { limits: true, ..State::new("page_clock_glance_limit", View::Panel, Page::Home) },
         State { dpi: 144, ..State::new("page_tasks_150", View::Panel, Page::Tasks) },
         State { hovered: Some(Hit::Command(Command::ToggleWeather)), ..State::new("page_settings", View::PanelTall, Page::Settings) },
         State { theme: Theme::Paper, ..State::new("page_settings_paper", View::PanelTall, Page::Settings) },
+        State { hovered: Some(Hit::Command(Command::ToggleTako)), ..State::new("page_settings_features", View::PanelTall, Page::Settings) },
+        State::new("page_settings_prayer", View::PanelTall, Page::Settings),
+        State { agents: true, ..State::new("page_settings_agents", View::PanelTall, Page::Settings) },
         State { hovered: Some(Hit::Command(Command::PrayerLead(15))), ..State::new("page_prayer", View::Panel, Page::Prayer) },
         State { theme: Theme::Paper, ..State::new("page_prayer_paper", View::Panel, Page::Prayer) },
         State { hovered: Some(Hit::CityInput), ..State::new("page_prayer_setup", View::Panel, Page::Prayer) },
         State { city_draft: Some("Yogya"), ..State::new("page_prayer_setup_typing", View::Panel, Page::Prayer) },
-        State { hud: Some(&prayer_soon), ..State::new("hud_prayer_soon", View::Hud, Page::Home) },
-        State { hud: Some(&prayer_now), ..State::new("hud_prayer_now", View::Hud, Page::Home) },
+        State { hud: Some(&prayer_soon), ..State::new("hud_prayer_soon", View::Card, Page::Home) },
+        State { hud: Some(&prayer_now), ..State::new("hud_prayer_now", View::Card, Page::Home) },
         State { agents: true, hovered: Some(Hit::PageDot(Page::Water)), ..State::new("page_clock_glance", View::Panel, Page::Home) },
         State { theme: Theme::Ocean, ..State::new("theme_ocean", View::Panel, Page::Focus) },
         State { theme: Theme::Ember, media: true, ..State::new("theme_ember", View::Panel, Page::Home) },
@@ -452,22 +583,24 @@ fn preview_states() {
         State { hud: Some(&brightness), ..State::new("hud_brightness", View::Hud, Page::Home) },
         State { hud: Some(&caps), ..State::new("hud_capslock", View::Hud, Page::Home) },
         State { hud: Some(&num), ..State::new("hud_numlock", View::Hud, Page::Home) },
-        State { hud: Some(&message), ..State::new("hud_message", View::Hud, Page::Home) },
-        State { hud: Some(&message_locked), locked: true, ..State::new("hud_message_locked", View::Hud, Page::Home) },
+        State { hud: Some(&message), ..State::new("hud_message", View::Card, Page::Home) },
+        State { hud: Some(&tako_hud), ..State::new("hud_tako", View::Card, Page::Home) },
+        State { hud: Some(&tako_media), ..State::new("hud_tako_media", View::Card, Page::Home) },
+        State { hud: Some(&message_locked), locked: true, ..State::new("hud_message_locked", View::Card, Page::Home) },
         State { media: true, locked: true, ..State::new("page_locked", View::Panel, Page::Home) },
         State { theme: Theme::Frost, ..State::new("theme_frost_pill", View::Pill, Page::Home) },
         State { theme: Theme::Frost, media: true, ..State::new("theme_frost", View::Panel, Page::Home) },
-        State { theme: Theme::Frost, hud: Some(&message), ..State::new("theme_frost_hud", View::Hud, Page::Home) },
+        State { theme: Theme::Frost, hud: Some(&message), ..State::new("theme_frost_hud", View::Card, Page::Home) },
         State { eyes: mood(Mood::Happy), ..State::new("mood_happy", View::Pill, Page::Home) },
         State { eyes: mood(Mood::Sleepy), ..State::new("mood_sleepy", View::Pill, Page::Home) },
         State { eyes: mood(Mood::Surprised), ..State::new("mood_surprised", View::Pill, Page::Home) },
         State { eyes: Eyes { look: (1.0, 1.0), ..Eyes::default() }, ..State::new("mood_look", View::Pill, Page::Home) },
         State { eyes: mood(Mood::Happy), ..State::new("mood_happy_panel", View::Panel, Page::Home) },
         State { eyes: Eyes { look: (-1.0, 0.6), mood: Mood::Surprised, open: 1.0 }, ..State::new("mood_surprised_panel", View::Panel, Page::Home) },
-        State { hud: Some(&screenshot), ..State::new("hud_screenshot", View::Hud, Page::Home) },
-        State { hud: Some(&download), ..State::new("hud_download", View::Hud, Page::Home) },
-        State { hud: Some(&wifi), ..State::new("hud_wifi", View::Hud, Page::Home) },
-        State { hud: Some(&wifi_limited), ..State::new("hud_wifi_limited", View::Hud, Page::Home) },
+        State { hud: Some(&screenshot), ..State::new("hud_screenshot", View::Card, Page::Home) },
+        State { hud: Some(&download), ..State::new("hud_download", View::Card, Page::Home) },
+        State { hud: Some(&wifi), ..State::new("hud_wifi", View::Card, Page::Home) },
+        State { hud: Some(&wifi_limited), ..State::new("hud_wifi_limited", View::Card, Page::Home) },
         State { pages: few_pages, ..State::new("pages_custom", View::Panel, Page::Tasks) },
         State { dpi: 84, ..State::new("size_small", View::Pill, Page::Home) },
         State { dpi: 110, media: true, ..State::new("size_large", View::Panel, Page::Home) },
@@ -479,8 +612,8 @@ fn preview_states() {
         State::new("page_timer_idle", View::Panel, Page::Timer),
         State::new("pill_timer", View::Pill, Page::Home),
         State { hud: Some(&timer_done), ..State::new("hud_timer", View::Hud, Page::Home) },
-        State { hud: Some(&agent_waiting), ..State::new("hud_agent_waiting", View::Hud, Page::Home) },
-        State { hud: Some(&agent_done), ..State::new("hud_agent_done", View::Hud, Page::Home) },
+        State { hud: Some(&agent_waiting), ..State::new("hud_agent_waiting", View::Card, Page::Home) },
+        State { hud: Some(&agent_done), ..State::new("hud_agent_done", View::Card, Page::Home) },
         State { weather: Some("28° Overcast · Jakarta"), ..State::new("page_clock_weather", View::Panel, Page::Home) },
         State { size: Some((188.0, 34.0)), shadow: Some(0.6), ..State::new("pill_peek", View::Pill, Page::Home) },
         State { fx: Some(&waiting), ..State::new("drop_waiting", View::Panel, Page::Shelf) },
@@ -494,13 +627,26 @@ fn preview_states() {
         State { media: true, calendar: Some(&calendar), weather: Some("29° Clear"), ..State::new("home_wide_media", View::PanelWide, Page::Home) },
         State { calendar: Some(&calendar), hovered: Some(Hit::AgendaRow(2)), ..State::new("home_wide_clock", View::PanelWide, Page::Home) },
         State { calendar: Some(&other_day), agenda_draft: Some("09.00 Mee"), battery: Some((34, true)), ..State::new("home_wide_typing", View::PanelWide, Page::Home) },
-        State { hud: Some(&agenda_due), ..State::new("hud_agenda", View::Hud, Page::Home) },
+        State { hud: Some(&agenda_due), ..State::new("hud_agenda", View::Card, Page::Home) },
         State { download: Some("12.4 MB"), size: Some((236.0, 30.0)), ..State::new("pill_download", View::Pill, Page::Home) },
         State { fx: Some(&sharing), ..State::new("drop_share", View::Panel, Page::Shelf) },
         State { media: true, lyrics_button: Some(false), ..State::new("player_seeking", View::Panel, Page::Home) },
         State { welcome: true, hovered: Some(Hit::WelcomeDone), ..State::new("welcome", View::Panel, Page::Home) },
         State { welcome: true, theme: Theme::Paper, ..State::new("welcome_paper", View::Panel, Page::Home) },
         State { hovered: Some(Hit::GoogleOpen), ..State::new("page_mail", View::Panel, Page::Mail) },
+        State { hovered: Some(Hit::TakoRow(1)), ..State::new("page_tako", View::PanelTall, Page::Tako) },
+        State { hovered: Some(Hit::TakoSection(TakoSection::Goal)), ..State::new("page_tako_leaderboard", View::PanelTall, Page::Tako) },
+        State::new("page_tako_milestone", View::PanelTall, Page::Tako),
+        State::new("page_tako_song_share", View::PanelTall, Page::Tako),
+        State::new("page_tako_poll", View::PanelTall, Page::Tako),
+        State::new("page_tako_timer", View::PanelTall, Page::Tako),
+        State::new("page_tako_vip_queue", View::PanelTall, Page::Tako),
+        State::new("page_tako_empty", View::PanelTall, Page::Tako),
+        State { hovered: Some(Hit::TakoKey), ..State::new("page_tako_setup", View::PanelTall, Page::Tako) },
+        State::new("page_settings_tako", View::PanelTall, Page::Settings),
+        State { player: Some(&video), ..State::new("player_video_loading", View::Player, Page::Home) },
+        State { player: Some(&video_ready), hovered: Some(Hit::PlayerClose), ..State::new("player_video", View::Player, Page::Home) },
+        State { player: Some(&video), theme: Theme::Paper, ..State::new("player_video_paper", View::Player, Page::Home) },
         State { hovered: Some(Hit::GoogleDisconnect), ..State::new("page_mail_hover", View::Panel, Page::Mail) },
         State { mail_setup: true, ..State::new("page_mail_setup", View::Panel, Page::Mail) },
         State { mail_setup: true, mail_editing: Some(0), ..State::new("page_mail_setup_typing", View::Panel, Page::Mail) },
@@ -534,6 +680,7 @@ fn preview_states() {
             width,
             height,
             alpha,
+            layout: [(width, height); CONTENTS],
             eyes: state.eyes,
             shadow: state.shadow.unwrap_or(if state.view.is_panel() { 1.0 } else { 0.0 }),
             time: "19:21",
@@ -562,6 +709,7 @@ fn preview_states() {
             system: Some(&data.system),
             uptime: "3 h 12 m",
             hovered: state.hovered,
+            pressed: None,
             seconds: 1.3,
             hover: 1.0,
             locked: state.locked,
@@ -573,7 +721,19 @@ fn preview_states() {
             agenda_draft: state.agenda_draft,
             download: state.download,
             agents: if state.agents { &data.agents } else { &[] },
+            agent_list: &agent_list(if state.agents { &data.agents } else { &[] }, agent_filter(state.name)),
+            agent_counts: agent_counts(if state.agents { &data.agents } else { &[] }),
+            agent_filter: agent_filter(state.name),
+            agent_open: state.name.ends_with("_open").then_some(0),
             agent_hooks: agents::HookStatus::default(),
+            agent_limits: if !state.limits {
+                &[]
+            } else if state.name.ends_with("_used_up") {
+                &used_up
+            } else {
+                &data.limits
+            },
+            unix: SAMPLE_NOW,
             mail: &if state.mail_setup {
                 MailView {
                     account: None,
@@ -600,9 +760,12 @@ fn preview_states() {
             } else {
                 data.plugins.clone()
             },
+            tako: &tako_view(&data.tako, state.name),
+            player: state.player,
             agent_scroll: 0,
             welcome: state.welcome,
             settings: Settings::default(),
+            settings_section: settings_section(state.name),
         };
         renderer.draw(&scene).unwrap();
         let _ = unsafe { GdiFlush() };
@@ -626,6 +789,7 @@ fn scene_for<'a>(data: &'a Sample, view: View, page: Page, media: bool) -> Scene
         width,
         height,
         alpha,
+        layout: [(width, height); CONTENTS],
         eyes: Eyes::default(),
         shadow: 0.0,
         time: "19:21",
@@ -654,6 +818,7 @@ fn scene_for<'a>(data: &'a Sample, view: View, page: Page, media: bool) -> Scene
         system: None,
         uptime: "",
         hovered: None,
+        pressed: None,
         seconds: 0.0,
         hover: 1.0,
         locked: false,
@@ -665,12 +830,21 @@ fn scene_for<'a>(data: &'a Sample, view: View, page: Page, media: bool) -> Scene
         agenda_draft: None,
         download: None,
         agents: &data.agents,
+        agent_list: &data.agents,
+        agent_counts: agent_counts(&data.agents),
+        agent_filter: AgentFilter::All,
+        agent_open: None,
         agent_hooks: agents::HookStatus::default(),
+        agent_limits: &data.limits,
+        unix: SAMPLE_NOW,
         mail: &data.mail,
         plugins: &data.plugins,
+        tako: &data.tako,
+        player: None,
         agent_scroll: 0,
         welcome: false,
         settings: Settings::default(),
+        settings_section: SettingsSection::default(),
     }
 }
 
@@ -995,27 +1169,43 @@ fn agenda_remove_reachable() {
 fn agents_page_rows_fit() {
     let data = sample();
     let renderer = Renderer::new(96, Theme::Ink).unwrap();
-    let width = View::Panel.size().0;
+    let (width, height) = View::PanelTall.size();
     let x0 = CANVAS.0 / 2.0 - width / 2.0;
     let (l, r) = (x0 + tokens::INSET, x0 + width - tokens::INSET);
-    let mut scene = scene_for(&data, View::Panel, Page::Agents, false);
-    scene.agents = &data.agents;
+    let mut scene = scene_for(&data, View::PanelTall, Page::Agents, false);
     renderer.draw(&scene).unwrap();
-    // Row centres: the shared list starts 10 DIP inside the deck, 40 DIP per row.
-    let first = tokens::CONTENT_SHIFT + tokens::DECK_TOP + 10.0 + 20.0;
-    assert_eq!(renderer.hit_at(l + 40.0, first), Some(Hit::AgentRow(0)));
-    assert_eq!(renderer.hit_at(l + 40.0, first + 40.0), Some(Hit::AgentRow(1)));
+    // The rows sit right of the limits column, under the filter keys, 40 DIP each, and every
+    // visible row ends inside the deck.
+    let cl = l + 150.0 + 24.0;
+    let list_top = tokens::CONTENT_SHIFT + tokens::DECK_TOP + 16.0 + 10.0 + 18.0;
+    for row in 0..crate::feeds::agents::VISIBLE {
+        let cy = list_top + 20.0 + 40.0 * row as f32;
+        assert_eq!(renderer.hit_at(cl + 60.0, cy), Some(Hit::AgentRow(row)), "row {row}");
+    }
+    let rows_end = list_top + 40.0 * crate::feeds::agents::VISIBLE as f32;
+    assert!(rows_end <= height - tokens::DECK_INSET - 6.0, "rows ({rows_end}) run out of the deck");
+    assert_eq!(renderer.hit_at(cl + 4.0, list_top - 18.0), Some(Hit::AgentFilter(AgentFilter::All)));
 
-    // The visible rows end above the footer row, which ends inside the panel.
-    let rows_end = tokens::CONTENT_SHIFT + tokens::DECK_TOP + 10.0 + 40.0 * crate::feeds::agents::VISIBLE as f32;
-    assert!(rows_end <= tokens::CONTENT_SHIFT + tokens::ROW_Y - tokens::CONTROL_H / 2.0, "rows run into the footer");
-    let bottom = tokens::CONTENT_SHIFT + tokens::ROW_Y + tokens::CONTROL_H / 2.0;
-    assert!(bottom < View::Panel.size().1 - 16.0, "rows and footer ({bottom}) reach the bottom edge");
-
-    // Without sessions, the header offers a manual refresh instead.
-    scene.agents = &[];
-    renderer.draw(&scene).unwrap();
+    // The limits column on the left, the hooks link at its foot, and Refresh in the caption.
+    let first_meter = list_top - 18.0 + 22.0 + 18.0;
+    assert_eq!(renderer.hit_at(l + 20.0, first_meter), Some(Hit::AgentLimits));
+    let foot = height - tokens::DECK_INSET - 16.0;
+    assert_eq!(renderer.hit_at(l + 10.0, foot), Some(Hit::AgentHooks));
     assert_eq!(renderer.hit_at(r - 8.0, tokens::TABS_Y), Some(Hit::AgentsRefresh));
+
+    // An open row shows its actions; Switch for a session with a window.
+    scene.agent_open = Some(0);
+    renderer.draw(&scene).unwrap();
+    let actions = list_top + 40.0 + 17.0 - 3.0;
+    assert_eq!(renderer.hit_at(r - 10.0, actions), Some(Hit::AgentSwitch(0)));
+
+    // Without sessions the limits and the hooks link stay.
+    scene.agents = &[];
+    scene.agent_list = &[];
+    scene.agent_open = None;
+    renderer.draw(&scene).unwrap();
+    assert_eq!(renderer.hit_at(l + 20.0, first_meter), Some(Hit::AgentLimits));
+    assert_eq!(renderer.hit_at(l + 10.0, foot), Some(Hit::AgentHooks));
 }
 
 /// Compare the cost of a full frame with redrawing only the wave.
@@ -1109,6 +1299,12 @@ fn new_pages_fit_and_hit_where_drawn() {
     renderer.draw(&setup).unwrap();
     let id = renderer.hit_rect(Hit::GoogleClient(0)).expect("client id box");
     let secret = renderer.hit_rect(Hit::GoogleClient(1)).expect("client secret box");
+    // Connect only works once both boxes hold something valid; empty, it is drawn but dimmed.
+    assert!(renderer.hit_rect(Hit::GoogleConnect).is_none(), "Connect works with empty boxes");
+    assert!(renderer.hit_rect(Hit::Paste(PasteTarget::GoogleId)).is_some(), "an empty box offers Paste");
+    let filled = MailView { id: "247995060423-test.apps.googleusercontent.com".into(), secret: "GOCSPX-sample-secret".into(), ..box_data.clone() };
+    setup.mail = &filled;
+    renderer.draw(&setup).unwrap();
     let connect = renderer.hit_rect(Hit::GoogleConnect).expect("connect button");
     assert!(id.bottom < secret.top, "the boxes overlap");
     assert!(connect.bottom <= id.top, "the button runs into the boxes");
@@ -1135,14 +1331,28 @@ fn prayer_and_settings_fit_their_panels() {
     assert!(last_lead.right < method.left, "the reminder choices overlap the method button");
     assert!(method.bottom <= tokens::DECK_BOTTOM + tokens::CONTENT_SHIFT, "the method button leaves the deck");
 
-    let renderer = Renderer::new(96, Theme::Ink).unwrap();
-    renderer.draw(&scene_for(&data, View::PanelTall, Page::Settings, false)).unwrap();
-    let deck = tokens::DECK_BOTTOM + View::PanelTall.size().1 - View::Panel.size().1 + tokens::CONTENT_SHIFT;
-    let hook = renderer.hit_rect(Hit::AgentHook(crate::feeds::agents::Provider::Copilot)).expect("hook button");
-    assert!(hook.bottom <= deck, "the hook row ends at {}, past the deck at {deck}", hook.bottom);
-    let hanafi = renderer.hit_rect(Hit::Command(Command::PrayerMadhab(crate::tools::prayer::Madhab::Hanafi))).expect("Asr choice");
-    let chip = renderer.hit_rect(Hit::Command(Command::PrayerMethod(crate::tools::prayer::Method::Mwl))).expect("method chip");
-    assert!(chip.right < hanafi.left, "the method chip runs into the Asr choice");
+    // Every Settings section: its last control ends inside the deck (with the page padding),
+    // to the right of the sidebar, and inside the panel's right padding.
+    let (width, height) = View::PanelTall.size();
+    let deck = tokens::DECK_BOTTOM + height - View::Panel.size().1 + tokens::CONTENT_SHIFT;
+    let last = [
+        (SettingsSection::Look, Hit::Command(Command::ToggleCompactHud)),
+        (SettingsSection::Features, Hit::Command(Command::ToggleScreenshots)),
+        (SettingsSection::Prayer, Hit::Command(Command::PrayerLead(30))),
+        (SettingsSection::Agents, Hit::AgentHook(crate::feeds::agents::Provider::Copilot)),
+    ];
+    for (section, hit) in last {
+        let mut scene = scene_for(&data, View::PanelTall, Page::Settings, false);
+        scene.settings_section = section;
+        let renderer = Renderer::new(96, Theme::Ink).unwrap();
+        renderer.draw(&scene).unwrap();
+        let area = renderer.hit_rect(hit).unwrap_or_else(|| panic!("{section:?}: last control"));
+        assert!(area.bottom <= deck - 12.0, "{section:?}: the last row ends at {}, past the deck at {deck}", area.bottom);
+        // The sidebar key starts 6 DIP before the content edge; rows may bleed 6 DIP past the other.
+        let sidebar = renderer.hit_rect(Hit::SettingsSection(section)).expect("sidebar key");
+        assert!(sidebar.right < area.left, "{section:?}: a control runs under the sidebar");
+        assert!(area.right - sidebar.left <= width - 2.0 * tokens::INSET + 12.0, "{section:?}: a control leaves the panel");
+    }
 }
 
 /// A saved client id with no secret yet must still show both boxes: the secret could otherwise
@@ -1156,7 +1366,7 @@ fn mail_setup_shows_both_boxes_until_connected() {
         rows: Vec::new(),
         setup: true,
         id: "247995060423-test.apps.googleusercontent.com".into(),
-        secret: String::new(),
+        secret: "GOCSPX-sample-secret".into(),
         editing: None,
         connecting: false,
     };

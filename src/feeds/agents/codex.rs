@@ -84,7 +84,7 @@ fn state(turn: Turn, age: u64) -> State {
 }
 
 /// The newest two day folders (`yyyy\mm\dd`), so a session that crosses midnight still shows.
-fn latest_days(sessions: &Path) -> Vec<PathBuf> {
+pub(super) fn latest_days(sessions: &Path) -> Vec<PathBuf> {
     let newest = |dir: &Path| -> Vec<PathBuf> {
         let mut dirs: Vec<PathBuf> = fs::read_dir(dir)
             .into_iter()

@@ -2,7 +2,7 @@
 //! relative to the canvas; `x0`/`x1` are the current left/right edges of the shape body.
 
 use super::*;
-use crate::feeds::agents::State as AgentState;
+use crate::feeds::agents::{State as AgentState, until};
 use crate::system::stats::{gigabytes, rate};
 use crate::tools::shelf::VISIBLE as SHELF_VISIBLE;
 use crate::tools::tasks::VISIBLE as TASKS_VISIBLE;
@@ -27,8 +27,23 @@ const LYRIC_CENTER: f32 = tokens::LYRIC_CENTER;
 const LYRIC_GAP: f32 = tokens::LYRIC_GAP;
 const COLUMN_SLIDE: f32 = tokens::COLUMN_SLIDE;
 const HEADER_Y: f32 = tokens::HEADER_Y;
+/// The card notice (`View::Card`): centre line, lead circle, text column, and title and line
+/// centres; `NOTICE_VALUE_MAX` caps the value on the title line so the title keeps its room.
+const NOTICE_CY: f32 = 29.0;
+const NOTICE_LEAD_X: f32 = 30.0;
+const NOTICE_LEAD_R: f32 = 15.0;
+const NOTICE_TEXT_X: f32 = 56.0;
+const NOTICE_PAD: f32 = 16.0;
+const NOTICE_TITLE_Y: f32 = 20.0;
+const NOTICE_LINE_Y: f32 = 38.0;
+const NOTICE_VALUE_MAX: f32 = 120.0;
+
 /// The tab row's center line in page coordinates (pages are drawn `CONTENT_SHIFT` lower).
 const TOP_Y: f32 = tokens::TABS_Y - tokens::CONTENT_SHIFT;
+/// Loading dots in the player slot: pulse speed (radians per second) and the phase step
+/// between neighbouring dots.
+const LOADING_SPEED: f64 = 6.0;
+const LOADING_STAGGER: f64 = 0.9;
 const TABS_Y: f32 = tokens::TABS_Y;
 const ROW_Y: f32 = tokens::ROW_Y;
 const ROW_H: f32 = tokens::ROW_H;
@@ -53,9 +68,23 @@ const TASKS_TOP: f32 = tokens::DECK_TOP + PAD + 12.0;
 const SHELF_TOP: f32 = tokens::DECK_TOP + PAD + 2.0;
 /// Gap between the prayer time tiles.
 const PRAYER_GAP: f32 = 6.0;
-/// Center lines of the Settings rows (theme, two switch rows, prayer, agent hooks) on the
-/// taller Settings panel: one 34 DIP rhythm, with the switch rows paired a little closer.
-const SETTINGS_ROWS: [f32; 5] = [57.0, 91.0, 121.0, 155.0, 189.0];
+/// Settings layout on its larger panel: a sidebar of sections, then the section's title, its
+/// one-line description, and up to four rows on a 32 DIP rhythm (page coordinates).
+const SETTINGS_TOP: f32 = tokens::DECK_TOP + PAD + 10.0;
+const SETTINGS_ABOUT: f32 = SETTINGS_TOP + 20.0;
+const SETTINGS_ROWS_TOP: f32 = SETTINGS_ABOUT + 30.0;
+const SETTINGS_ROW_PITCH: f32 = 32.0;
+const SETTINGS_SIDEBAR: f32 = 112.0;
+const SETTINGS_GAP: f32 = 24.0;
+const SETTINGS_SECTION_PITCH: f32 = 30.0;
+const SETTINGS_SECTION_H: f32 = 26.0;
+/// Feature cards: a little taller than a capsule control, so two columns read as tiles.
+const SETTINGS_CARD_H: f32 = 26.0;
+/// Settings switches.
+const SWITCH_W: f32 = 26.0;
+const SWITCH_H: f32 = 14.0;
+/// One settings switch: label, state, uses the internet, and its command.
+type SettingsSwitch = (&'static str, bool, bool, Command);
 const HERO_Y: f32 = tokens::HERO_Y;
 /// Music player: cover, progress bar, and button row.
 const ART_TOP: f32 = 36.0;
@@ -182,6 +211,9 @@ impl Renderer {
     }
 
     fn draw_hud_card(&self, s: &Scene, hud: &Hud, x0: f32, x1: f32, a: f32) {
+        if hud.card() {
+            return self.draw_notice(s, hud, x0, x1, a);
+        }
         let p = &self.pal;
         let cy = 22.0;
         let row = |left: f32, right: f32| rect(left, cy - 10.0, right, cy + 10.0);
@@ -200,24 +232,6 @@ impl Renderer {
                 if let Some(percent) = percent {
                     self.text(&format!("{percent}%"), &self.fonts.label_end, row(x1 - 80.0, x1 - 20.0), color, a);
                 }
-            }
-            Hud::Bluetooth { name, connected, battery, kind, .. } => {
-                self.circle(x0 + 28.0, cy, 13.0, if *connected { BLUE } else { p.dim }, a);
-                self.glyph(ICON_BLUETOOTH, &self.fonts.icon_13, x0 + 28.0, cy, WHITE, a);
-                self.text(name, &self.fonts.label, rect(x0 + 50.0, 6.0, x1 - 52.0, 22.0), p.text, a);
-                let status = match (*connected, battery) {
-                    (true, Some(b)) => format!("Connected · {b}%"),
-                    (true, None) => "Connected".to_string(),
-                    (false, _) => "Disconnected".to_string(),
-                };
-                self.text(&status, &self.fonts.caption, rect(x0 + 50.0, 22.0, x1 - 52.0, 37.0), p.muted, a);
-                let device = match kind {
-                    DeviceKind::Audio => ICON_HEADPHONE,
-                    DeviceKind::Input => ICON_KEYBOARD,
-                    DeviceKind::Phone => ICON_PHONE,
-                    DeviceKind::Other => ICON_BLUETOOTH,
-                };
-                self.glyph(device, &self.fonts.icon_16, x1 - 28.0, cy, p.muted, a);
             }
             Hud::Focus { finished } => {
                 // The color marks the phase that starts next.
@@ -266,81 +280,133 @@ impl Renderer {
                 let state = if *on { "On" } else { "Off" };
                 self.text(state, &self.fonts.label_end, row(x1 - 80.0, x1 - 20.0), if *on { p.accent } else { p.muted }, a);
             }
-            Hud::Message { app, aumid, sender, text, .. } => {
-                self.logo(aumid, x0 + 28.0, cy, 26.0, a);
-                self.text(sender, &self.fonts.label, rect(x0 + 50.0, 6.0, x1 - 70.0, 22.0), p.text, a);
-                self.text(app, &self.fonts.caption_end, rect(x1 - 90.0, 6.0, x1 - 20.0, 22.0), p.muted, a);
-                self.text(text, &self.fonts.caption, rect(x0 + 50.0, 22.0, x1 - 20.0, 37.0), p.soft, a);
-            }
-            Hud::Mail { from, subject, initials, more } => {
-                // The sender's initials in a circle stand in for a logo: mail has no app icon.
-                self.circle(x0 + 28.0, cy, 13.0, BLUE, a);
-                self.text(initials, &self.fonts.label_center, rect(x0 + 15.0, cy - 9.0, x0 + 41.0, cy + 9.0), ON_STATUS, a);
-                self.text(from, &self.fonts.label, rect(x0 + 50.0, 6.0, x1 - 70.0, 22.0), p.text, a);
-                let right = if *more > 0 { format!("+{more}") } else { "Gmail".to_string() };
-                self.text(&right, &self.fonts.caption_end, rect(x1 - 70.0, 6.0, x1 - 20.0, 22.0), p.muted, a);
-                self.text(subject, &self.fonts.caption, rect(x0 + 50.0, 22.0, x1 - 20.0, 37.0), p.soft, a);
-            }
-            Hud::Screenshot { id, name, more } => {
-                self.thumb(*id, false, x0 + 30.0, cy - 15.0, 30.0, a);
-                let title = if *more > 0 { format!("{} screenshots added to shelf", more + 1) } else { "Screenshot added to shelf".to_string() };
-                self.text(&title, &self.fonts.label, rect(x0 + 54.0, 6.0, x1 - 20.0, 22.0), p.text, a);
-                self.text(name, &self.fonts.caption, rect(x0 + 54.0, 22.0, x1 - 20.0, 37.0), p.muted, a);
-            }
-            Hud::Download { name, more, .. } => {
-                self.circle(x0 + 28.0, cy, 13.0, BLUE, a);
-                self.glyph(ICON_DOWNLOAD, &self.fonts.icon_13, x0 + 28.0, cy, WHITE, a);
-                self.text("Download complete", &self.fonts.label, rect(x0 + 50.0, 6.0, x1 - 20.0, 22.0), p.text, a);
-                let detail = if *more > 0 { format!("{name} +{more} more") } else { name.clone() };
-                self.text(&detail, &self.fonts.caption, rect(x0 + 50.0, 22.0, x1 - 20.0, 37.0), p.muted, a);
-            }
-            Hud::Wifi { name, connected, internet } => {
-                self.circle(x0 + 28.0, cy, 13.0, if *connected { BLUE } else { p.dim }, a);
-                self.glyph(ICON_WIFI, &self.fonts.icon_13, x0 + 28.0, cy, WHITE, a);
-                let title = if name.is_empty() { "Wi-Fi" } else { name.as_str() };
-                self.text(title, &self.fonts.label, rect(x0 + 50.0, 6.0, x1 - 20.0, 22.0), p.text, a);
-                let (status, color) = match (*connected, *internet) {
-                    (true, true) => ("Connected", p.muted),
-                    (true, false) => ("Connected · no internet access", ORANGE),
-                    (false, _) => ("Disconnected", p.muted),
-                };
-                self.text(status, &self.fonts.caption, rect(x0 + 50.0, 22.0, x1 - 20.0, 37.0), color, a);
-            }
-            Hud::Agenda { text, time } => {
-                self.circle(x0 + 28.0, cy, 13.0, p.accent, a);
-                self.glyph(ICON_CALENDAR, &self.fonts.icon_13, x0 + 28.0, cy, WHITE, a);
-                self.text(text, &self.fonts.label, rect(x0 + 50.0, 6.0, x1 - 76.0, 22.0), p.text, a);
-                self.text("Happening now", &self.fonts.caption, rect(x0 + 50.0, 22.0, x1 - 20.0, 37.0), p.muted, a);
-                self.text(time, &self.fonts.label_end, rect(x1 - 76.0, 6.0, x1 - 20.0, 22.0), p.accent, a);
-            }
-            Hud::Prayer { name, time, ahead } => {
-                // Green when the azan is now, the accent for the reminder before it.
-                let (fill, on) = if *ahead == 0 { (GREEN, ON_STATUS) } else { (p.accent, p.on_accent) };
-                self.circle(x0 + 28.0, cy, 13.0, fill, a);
-                self.glyph(ICON_PRAYER, &self.fonts.icon_13, x0 + 28.0, cy, on, a);
-                let title = if *ahead == 0 { format!("Time for {name}") } else { format!("{name} in {ahead} min") };
-                self.text(&title, &self.fonts.label, rect(x0 + 50.0, 6.0, x1 - 76.0, 22.0), p.text, a);
-                let line = if *ahead == 0 { "The azan is now" } else { "Time to get ready" };
-                self.text(line, &self.fonts.caption, rect(x0 + 50.0, 22.0, x1 - 20.0, 37.0), p.muted, a);
-                self.text(time, &self.fonts.label_end, rect(x1 - 76.0, 6.0, x1 - 20.0, 22.0), fill, a);
-            }
             Hud::Timer { minutes } => {
                 self.glyph(ICON_TIMER, &self.fonts.icon_16, x0 + 27.0, cy, ORANGE, a);
                 self.text("Timer done", &self.fonts.label, row(x0 + 50.0, x1 - 100.0), p.text, a);
                 self.text(&format!("{minutes} min"), &self.fonts.caption_end, row(x1 - 100.0, x1 - 20.0), ORANGE, a);
             }
-            Hud::Agent { kind, title, project, detail, needs_input, .. } => {
-                let color = if *needs_input { ORANGE } else { p.accent };
-                self.circle(x0 + 28.0, cy, 13.0, color, a);
-                // Both fills are light (orange, accent), so the glyph is ink for contrast.
-                self.glyph(if *needs_input { ICON_MESSAGE } else { ICON_CHECK }, &self.fonts.icon_13, x0 + 28.0, cy, INK, a);
-                let headline = if *needs_input { format!("{} needs you", kind.label()) } else { format!("{} finished", kind.label()) };
-                self.text(&headline, &self.fonts.label, rect(x0 + 50.0, 6.0, x1 - 110.0, 22.0), p.text, a);
-                self.text(project, &self.fonts.caption_end, rect(x1 - 120.0, 6.0, x1 - 20.0, 22.0), p.muted, a);
-                let line = if *needs_input && !detail.is_empty() { format!("{title} · {detail}") } else { title.clone() };
-                self.text(&line, &self.fonts.caption, rect(x0 + 50.0, 22.0, x1 - 20.0, 37.0), p.soft, a);
-            }
+            // Two-line notices are drawn by `draw_notice`.
+            _ => {}
         }
+    }
+
+    /// A two-line notice on the card shape (`View::Card`): a lead circle, the title with an
+    /// optional value on its right, the line under it, and the notice's action on the right.
+    /// Clicking anywhere on the notice does that action; the button says what it is.
+    fn draw_notice(&self, s: &Scene, hud: &Hud, x0: f32, x1: f32, a: f32) {
+        let p = &self.pal;
+        let (cx, cy) = (x0 + NOTICE_LEAD_X, NOTICE_CY);
+        let lead = |fill: D2D1_COLOR_F, icon: char, on: D2D1_COLOR_F| {
+            self.circle(cx, cy, NOTICE_LEAD_R, fill, a);
+            self.glyph(icon, &self.fonts.icon_13, cx, cy, on, a);
+        };
+        let initials = |fill: D2D1_COLOR_F, text: &str, on: D2D1_COLOR_F| {
+            self.circle(cx, cy, NOTICE_LEAD_R, fill, a);
+            self.text(text, &self.fonts.label_center, rect(cx - NOTICE_LEAD_R, cy - 9.0, cx + NOTICE_LEAD_R, cy + 9.0), on, a);
+        };
+        let action = if s.locked { None } else { hud.action() };
+        let lines = |title: &str, value: Option<(&str, D2D1_COLOR_F, bool)>, line: &str, line_color: D2D1_COLOR_F| {
+            self.notice_lines(x0, x1, (title, value), (line, line_color), action, a);
+        };
+        match hud {
+            Hud::Bluetooth { name, connected, battery, kind, .. } => {
+                // The lead shows what kind of device it is; Bluetooth is what the circle's blue says.
+                let device = match kind {
+                    DeviceKind::Audio => ICON_HEADPHONE,
+                    DeviceKind::Input => ICON_KEYBOARD,
+                    DeviceKind::Phone => ICON_PHONE,
+                    DeviceKind::Other => ICON_BLUETOOTH,
+                };
+                lead(if *connected { BLUE } else { p.dim }, device, WHITE);
+                let status = match (*connected, battery) {
+                    (true, Some(b)) => format!("Connected · {b}%"),
+                    (true, None) => "Connected".to_string(),
+                    (false, _) => "Disconnected".to_string(),
+                };
+                lines(name, None, &status, p.muted);
+            }
+            Hud::Message { app, aumid, sender, text, .. } => {
+                self.logo(aumid, cx, cy, 2.0 * NOTICE_LEAD_R, a);
+                lines(sender, Some((app, p.muted, false)), text, p.soft);
+            }
+            Hud::Mail { from, subject, initials: letters, more } => {
+                // The sender's initials stand in for a logo: mail has no app icon.
+                initials(BLUE, letters, ON_STATUS);
+                let right = if *more > 0 { format!("+{more}") } else { "Gmail".to_string() };
+                lines(from, Some((&right, p.muted, false)), subject, p.soft);
+            }
+            Hud::Tako { name, value, line, initials: letters, .. } => {
+                // The donor's initials on the accent, like a mail sender: donations carry no logo.
+                initials(p.accent, letters, p.on_accent);
+                lines(name, Some((value, p.accent, true)), line, p.soft);
+            }
+            Hud::Screenshot { id, name, more } => {
+                self.thumb(*id, false, cx, cy - NOTICE_LEAD_R, 2.0 * NOTICE_LEAD_R, a);
+                let title = if *more > 0 { format!("{} screenshots added to shelf", more + 1) } else { "Screenshot added to shelf".to_string() };
+                lines(&title, None, name, p.muted);
+            }
+            Hud::Download { name, more, .. } => {
+                lead(BLUE, ICON_DOWNLOAD, WHITE);
+                let detail = if *more > 0 { format!("{name} +{more} more") } else { name.clone() };
+                lines("Download complete", None, &detail, p.muted);
+            }
+            Hud::Wifi { name, connected, internet } => {
+                lead(if *connected { BLUE } else { p.dim }, ICON_WIFI, WHITE);
+                let title = if name.is_empty() { "Wi-Fi" } else { name.as_str() };
+                let (status, color) = match (*connected, *internet) {
+                    (true, true) => ("Connected", p.muted),
+                    (true, false) => ("Connected · no internet access", ORANGE),
+                    (false, _) => ("Disconnected", p.muted),
+                };
+                lines(title, None, status, color);
+            }
+            Hud::Agenda { text, time } => {
+                lead(p.accent, ICON_CALENDAR, p.on_accent);
+                lines(text, Some((time, p.accent, true)), "Happening now", p.muted);
+            }
+            Hud::Prayer { name, time, ahead } => {
+                // Green when the azan is now, the accent for the reminder before it.
+                let (fill, on) = if *ahead == 0 { (GREEN, ON_STATUS) } else { (p.accent, p.on_accent) };
+                lead(fill, ICON_PRAYER, on);
+                let title = if *ahead == 0 { format!("Time for {name}") } else { format!("{name} in {ahead} min") };
+                let line = if *ahead == 0 { "The azan is now" } else { "Time to get ready" };
+                lines(&title, Some((time, fill, true)), line, p.muted);
+            }
+            Hud::Agent { kind, title, project, detail, needs_input, .. } => {
+                // Both fills are light (orange, accent), so the glyph is ink for contrast.
+                let color = if *needs_input { ORANGE } else { p.accent };
+                lead(color, if *needs_input { ICON_MESSAGE } else { ICON_CHECK }, INK);
+                let headline = if *needs_input { format!("{} needs you", kind.label()) } else { format!("{} finished", kind.label()) };
+                let line = if *needs_input && !detail.is_empty() { format!("{title} · {detail}") } else { title.clone() };
+                lines(&headline, Some((project, p.muted, false)), &line, p.soft);
+            }
+            _ => {}
+        }
+    }
+
+    /// The text column of a card notice and its action button. The value never pushes the
+    /// title out: it is capped, and the title gets what is left.
+    fn notice_lines(&self, x0: f32, x1: f32, (title, value): (&str, Option<(&str, D2D1_COLOR_F, bool)>), (line, line_color): (&str, D2D1_COLOR_F), action: Option<&str>, a: f32) {
+        let p = &self.pal;
+        let left = x0 + NOTICE_TEXT_X;
+        let mut r = x1 - NOTICE_PAD;
+        if let Some(label) = action {
+            let width = self.text_width(label, &self.fonts.label_center) + 24.0;
+            let button = rect(r - width, NOTICE_CY - CONTROL_H / 2.0, r, NOTICE_CY + CONTROL_H / 2.0);
+            self.chip(button, label, Style::Primary, false, a);
+            r = button.left - TIGHT;
+        }
+        let mut title_r = r;
+        // A strong value (an amount, a time) matches the title; a quiet one (the app, the
+        // project) is a caption.
+        if let Some((value, color, strong)) = value {
+            let font = if strong { &self.fonts.label_end } else { &self.fonts.caption_end };
+            let width = self.text_width(value, font).min(NOTICE_VALUE_MAX);
+            self.text(value, font, rect(r - width, NOTICE_TITLE_Y - 9.0, r, NOTICE_TITLE_Y + 9.0), color, a);
+            title_r = r - width - TIGHT;
+        }
+        self.text(title, &self.fonts.label, rect(left, NOTICE_TITLE_Y - 9.0, title_r, NOTICE_TITLE_Y + 9.0), p.text, a);
+        self.text(line, &self.fonts.caption, rect(left, NOTICE_LINE_Y - 8.0, r, NOTICE_LINE_Y + 8.0), line_color, a);
     }
 
     pub(super) fn draw_panel(&self, s: &Scene, x0: f32, x1: f32, a: f32) {
@@ -348,6 +414,12 @@ impl Renderer {
         // slightly.
         self.begin_zoom(0.8 + 0.2 * a, (x0 + x1) / 2.0);
         let dy = (1.0 - a) * -6.0;
+        if let Some(player) = s.player {
+            self.set_offset(0.0, dy);
+            self.player_page(s, player, x0, x1, a);
+            self.end_zoom();
+            return;
+        }
         if s.welcome {
             self.set_offset(0.0, dy);
             self.welcome_page(s, x0, x1, a);
@@ -362,9 +434,13 @@ impl Renderer {
             }
             None => self.page(s, s.page, x0, x1, a, (0.0, dy)),
         }
-        // On the lock screen only Home (clock/music) may be opened.
+        // On the lock screen only Home (clock/music) may be opened; the tab row says why.
         if !s.locked {
             self.navigation(s, x0, x1, a, dy);
+        } else {
+            let (l, y) = (x0 + MARGIN, TABS_Y + dy);
+            self.glyph(ICON_LOCK, &self.fonts.icon_11, l + 6.0, y, self.pal.muted, a);
+            self.text("Locked", &self.fonts.caption, rect(l + 18.0, y - 8.0, l + 90.0, y + 8.0), self.pal.muted, a);
         }
         self.end_zoom();
     }
@@ -390,6 +466,7 @@ impl Renderer {
             Page::Agents => self.agents_page(s, x0, x1, a),
             Page::Mail => self.mail_page(s, x0, x1, a),
             Page::Plugins => self.plugins_page(s, x0, x1, a),
+            Page::Tako => self.tako_page(s, x0, x1, a),
             Page::Settings => self.settings_page(s, x0, x1, a),
         }
         self.shift.set(0.0);
@@ -565,9 +642,24 @@ impl Renderer {
         self.rounded(rect(card.left + 1.0, card.top + 1.0, card.right - 1.0, card.bottom - 1.0), RADIUS_LYRIC - 1.0, with_alpha(glow, 0.05), a);
         let inner = rect(card.left + LYRIC_PAD, card.top + LYRIC_PAD, card.right - LYRIC_PAD, card.bottom - LYRIC_PAD);
 
-        if let Some(status) = lyrics.status {
-            self.empty_state(inner, Some(ICON_MUSIC), status, "", a);
-            return;
+        match lyrics.status {
+            // Placeholder lines where the lyrics will be, so the card never looks broken.
+            Some(LyricStatus::Searching) => {
+                let widths = [0.86, 0.62, 0.44];
+                for (i, share) in widths.into_iter().enumerate() {
+                    let y = inner.top + 8.0 + i as f32 * 20.0;
+                    let width = (inner.right - inner.left) * share;
+                    self.rounded(rect(inner.left, y - 6.0, inner.left + width, y + 6.0), 6.0, self.tint(tokens::FILL_SOFT), a);
+                }
+                let y = inner.bottom - 8.0;
+                self.text("Looking up lyrics…", &self.fonts.caption, rect(inner.left, y - 8.0, inner.right, y + 8.0), p.muted, a);
+                return;
+            }
+            Some(LyricStatus::Missing) => {
+                self.empty_state(inner, Some(ICON_MUSIC), "No lyrics for this track", "LRCLIB has no synced lines for it", a);
+                return;
+            }
+            None => {}
         }
         let eased = 1.0 - (1.0 - lyrics.scroll.clamp(0.0, 1.0)).powi(3);
         // Lines that scroll past the padding fade out there instead of reaching the card's edge.
@@ -600,20 +692,38 @@ impl Renderer {
         let (l, r) = (x0 + MARGIN, x1 - MARGIN);
         self.text("Hi! This is Crest", &self.fonts.title, rect(l, HEADER_Y - 10.0, r - 60.0, HEADER_Y + 10.0), p.text, a);
         self.eyes(r - 18.0, HEADER_Y + 2.0, EyeSize::HEADER, s.eyes, a);
-        let tips = [
-            "Hover the pill with the cursor to open it",
-            "The tabs on top or the mouse wheel switch pages",
-            "Settings: the gear at the end of the tabs, or the tray icon",
-            "Lyrics, weather, and messages stay off until you turn them on",
+        // Three choices that need the user's yes (they read online data or other apps), as
+        // cards that switch on and off where they are; everything else is in Settings.
+        let st = &s.settings;
+        let choices = [
+            ("Lyrics", "From LRCLIB", st.lyrics, Command::ToggleLyrics),
+            ("Calendar", "Next events", st.calendar, Command::ToggleCalendar),
+            ("Agents", "Coding agents", s.pages.shown(Page::Agents), Command::TogglePage(Page::Agents)),
         ];
-        for (i, tip) in tips.iter().enumerate() {
-            let y = 48.0 + i as f32 * 19.0;
-            self.circle(l + 4.0, y, 2.5, p.accent, a);
-            self.text(tip, &self.fonts.caption, rect(l + 14.0, y - 9.0, r, y + 9.0), p.soft, a);
+        let gap = 8.0;
+        let width = (r - l - 2.0 * gap) / 3.0;
+        for (i, (title, line, on, command)) in choices.into_iter().enumerate() {
+            let x = l + i as f32 * (width + gap);
+            let card = rect(x, WELCOME_CARD_TOP, x + width, WELCOME_CARD_TOP + WELCOME_CARD_H);
+            let hit = Hit::Command(command);
+            let over = s.hovered == Some(hit);
+            if on {
+                self.rounded(card, tokens::RADIUS_ROW, with_alpha(p.accent, 0.14), a);
+                self.outline(card, tokens::RADIUS_ROW, 1.0, false, with_alpha(p.accent, 0.45), a);
+            } else {
+                self.card(card, tokens::RADIUS_ROW, over, a);
+            }
+            let inner = rect(card.left + 10.0, card.top, card.right - 30.0, card.bottom);
+            self.text(title, &self.fonts.label, rect(inner.left, card.top + 8.0, inner.right, card.top + 26.0), p.text, a);
+            self.text(line, &self.fonts.caption, rect(inner.left, card.top + 26.0, card.right - 8.0, card.top + 42.0), p.muted, a);
+            self.switch(rect(card.right - 10.0 - SWITCH_W, card.top + 17.0 - SWITCH_H / 2.0, card.right - 10.0, card.top + 17.0 + SWITCH_H / 2.0), on, a);
+            self.hit(card, hit);
         }
-        let button = rect(r - 110.0, ROW_Y - CONTROL_H / 2.0, r, ROW_Y + CONTROL_H / 2.0);
+        let width = self.text_width("Get started", &self.fonts.label_center) + 32.0;
+        let button = rect(r - width, ROW_Y - CONTROL_H / 2.0, r, ROW_Y + CONTROL_H / 2.0);
+        self.text("Hover the pill to open Crest · the gear has the rest", &self.fonts.caption, rect(l, ROW_Y - 8.0, button.left - TIGHT, ROW_Y + 8.0), p.muted, a);
         let over = s.hovered == Some(Hit::WelcomeDone);
-        self.chip(button, "Got it", Style::Primary, over, a);
+        self.chip(button, "Get started", Style::Primary, over, a);
         self.hit(button, Hit::WelcomeDone);
     }
 
@@ -763,11 +873,18 @@ impl Renderer {
             chips.push((None, format!("{} / {} L", liters(s.water.ml), liters(s.water.goal)), BLUE, Page::Water));
         }
         if s.pages.shown(Page::Agents) {
+            // One chip for the page, the most urgent news first: a session waiting for you, then an
+            // agent close to its plan limit (before it stops mid-task), then the working count.
             let count = |state: AgentState| s.agents.iter().filter(|row| row.state == state).count();
-            match (count(AgentState::Waiting), count(AgentState::Running)) {
-                (0, 0) => {}
-                (0, working) => chips.push((Some(ICON_TERMINAL), format!("{working} working"), GREEN, Page::Agents)),
-                (waiting, _) => chips.push((Some(ICON_TERMINAL), format!("{waiting} need you"), ORANGE, Page::Agents)),
+            let limit = s.agent_limits.first().and_then(|limits| Some((limits, limits.tightest()?))).filter(|(_, meter)| meter.used >= LIMIT_WARN);
+            match (count(AgentState::Waiting), limit, count(AgentState::Running)) {
+                (0, None, 0) => {}
+                (0, None, working) => chips.push((Some(ICON_TERMINAL), format!("{working} working"), GREEN, Page::Agents)),
+                (0, Some((limits, meter)), _) => {
+                    let text = format!("{} {}%", limits.kind.label(), meter.used);
+                    chips.push((Some(ICON_STOPWATCH), text, limit_color(meter.used, p.accent), Page::Agents));
+                }
+                (waiting, ..) => chips.push((Some(ICON_TERMINAL), format!("{waiting} need you"), ORANGE, Page::Agents)),
             }
         }
         let mut x = l;
@@ -1094,6 +1211,41 @@ impl Renderer {
         self.push_clip(inner);
         self.text(label, &self.fonts.input, inner, color, a);
         self.pop_clip();
+    }
+
+    /// A setup box at rest: the field, a Paste button inside it while it is empty, and once it
+    /// holds something, its check: a green tick when valid, a red outline when not.
+    #[allow(clippy::too_many_arguments)]
+    fn setup_field(&self, s: &Scene, area: D2D_RECT_F, (text, placeholder): (&str, &str), (hit, paste): (Hit, Hit), valid: bool, masked: bool, a: f32) {
+        let shown = if masked { mask(text) } else { text.to_string() };
+        self.text_field(area, &shown, placeholder, s.hovered == Some(hit), a);
+        self.hit(area, hit);
+        let cy = (area.top + area.bottom) / 2.0;
+        if text.trim().is_empty() {
+            let width = self.text_width("Paste", &self.fonts.caption_center) + 16.0;
+            let button = rect(area.right - width - 4.0, cy - 9.0, area.right - 4.0, cy + 9.0);
+            let over = s.hovered == Some(paste);
+            self.rounded(button, 9.0, self.tint(if over { tokens::FILL_STRONG } else { tokens::FILL_SUBTLE }), a);
+            self.text("Paste", &self.fonts.caption_center, button, if over { self.pal.text } else { self.pal.soft }, a);
+            self.hit(button, paste);
+        } else if valid {
+            self.outline(area, tokens::RADIUS_ROW, 1.0, false, with_alpha(GREEN, 0.6), a);
+            self.circle(area.right - 14.0, cy, 8.0, self.pal.placeholder, a);
+            self.glyph(ICON_CHECK, &self.fonts.icon_9, area.right - 14.0, cy, GREEN, a);
+        } else {
+            self.outline(area, tokens::RADIUS_ROW, 1.0, false, with_alpha(RED, 0.7), a);
+        }
+    }
+
+    /// A button that can be unavailable: dimmed and not clickable until `enabled`.
+    #[allow(clippy::too_many_arguments)]
+    fn action_chip(&self, s: &Scene, area: D2D_RECT_F, label: &str, style: Style, hit: Hit, enabled: bool, a: f32) {
+        if enabled {
+            self.chip(area, label, style, s.hovered == Some(hit), a);
+            self.hit(area, hit);
+        } else {
+            self.chip(area, label, style, false, a * tokens::DISABLED);
+        }
     }
 
     /// Focused text box: a `--ring` outline, with the text shifted so the typed end stays visible.
@@ -1565,7 +1717,7 @@ impl Renderer {
         for (row, &index) in order.iter().skip(tasks.scroll).take(TASKS_VISIBLE).enumerate() {
             let task = &tasks.items[index];
             let y = TASKS_TOP + row as f32 * ROW_H;
-            let hovered = matches!(s.hovered, Some(Hit::TaskToggle(i) | Hit::TaskRemove(i)) if i == index);
+            let hovered = matches!(s.hovered, Some(Hit::TaskToggle(i) | Hit::TaskRemove(i) | Hit::TaskTop(i)) if i == index);
             self.list_row(rect(l - 6.0, y - 11.0, r + 6.0, y + 11.0), tokens::RADIUS_ROW, hovered, a);
             let cx = l + 9.0;
             if task.done {
@@ -1574,7 +1726,9 @@ impl Renderer {
             } else {
                 self.circle_outline(cx, y, 7.0, 1.5, if hovered { p.text } else { p.muted }, a);
             }
-            let area = rect(l + 26.0, y - 10.0, r - 26.0, y + 10.0);
+            // While hovered the row's actions take its right end: Move to top (open tasks), Delete.
+            let actions = if hovered { if task.done { 26.0 } else { 50.0 } } else { 0.0 };
+            let area = rect(l + 26.0, y - 10.0, r - 6.0 - actions, y + 10.0);
             if task.done {
                 self.text_struck(&task.text, &self.fonts.body, area, p.muted, a);
             } else {
@@ -1583,8 +1737,15 @@ impl Renderer {
             self.hit(rect(l - 6.0, y - 11.0, r - 20.0, y + 11.0), Hit::TaskToggle(index));
             if hovered {
                 let over = s.hovered == Some(Hit::TaskRemove(index));
+                self.icon_button(r - 8.0, y, 10.0, over, a);
                 self.glyph(ICON_CLOSE, &self.fonts.icon_9, r - 8.0, y, if over { RED } else { p.muted }, a);
-                self.hit(rect(r - 20.0, y - 11.0, r + 6.0, y + 11.0), Hit::TaskRemove(index));
+                self.hit(rect(r - 19.0, y - 11.0, r + 6.0, y + 11.0), Hit::TaskRemove(index));
+                if !task.done {
+                    let over = s.hovered == Some(Hit::TaskTop(index));
+                    self.icon_button(r - 32.0, y, 10.0, over, a);
+                    self.glyph(ICON_CHEVRON_UP, &self.fonts.icon_9, r - 32.0, y, if over { p.text } else { p.muted }, a);
+                    self.hit(rect(r - 43.0, y - 11.0, r - 20.0, y + 11.0), Hit::TaskTop(index));
+                }
             }
         }
         // Markers for more tasks above/below; scrolled with the mouse wheel.
@@ -1617,78 +1778,185 @@ impl Renderer {
     /// (in its tint) and project. The waiting reason only shows for a
     /// session that needs you. Rows scroll with the mouse wheel; clicking one switches to the
     /// agent's terminal or editor.
+    /// Coding agents on the large panel: plan limits in a column on the left, the sessions on
+    /// the right under a filter row, a banner while a plan is used up, and rows that open in
+    /// place with what can be done about them.
     fn agents_page(&self, s: &Scene, x0: f32, x1: f32, a: f32) {
         let p = &self.pal;
         let (l, r) = (x0 + MARGIN, x1 - MARGIN);
-        let rows = s.agents;
-        if rows.is_empty() {
-            self.header(s, Header { right: "Refresh", right_hit: Some(Hit::AgentsRefresh) }, x1, a);
-            self.empty_state(
-                rect(l, EMPTY_AREA.0, r, EMPTY_AREA.1),
-                Some(ICON_TERMINAL),
-                "No agents at work",
-                "Claude Code, Codex, Cursor, Copilot CLI, and omp appear here live",
-                a,
-            );
-            self.empty_actions(s, l, r, &[("Install hooks", Hit::AgentHooks, Style::Primary)], a);
+        let bottom = tokens::DECK_BOTTOM + (s.height - View::Panel.size().1).max(0.0);
+        self.header(s, Header { right: "Refresh", right_hit: Some(Hit::AgentsRefresh) }, x1, a);
+        self.agent_limits_column(s, l, bottom, a);
+        self.separator(l + AGENT_SIDE + SETTINGS_GAP / 2.0, tokens::DECK_TOP + PAD, bottom - PAD, a);
+        let cl = l + AGENT_SIDE + SETTINGS_GAP;
+        if s.agents.is_empty() {
+            let area = rect(cl, tokens::DECK_TOP + PAD, r, bottom - PAD);
+            self.empty_state(area, Some(ICON_TERMINAL), "No agents at work", "Claude Code, Codex, Cursor, Copilot, and omp show up here", a);
             return;
         }
-        let waiting = rows.iter().filter(|row| row.state == AgentState::Waiting).count();
-        self.header(s, Header { right: "", right_hit: None }, x1, a);
-        if waiting > 0 {
-            // A badge, not another line of text: the count that matters reads at a glance.
-            self.badge(r - 18.0, TOP_Y, &waiting.to_string(), Some(ORANGE), a);
+
+        // Filter keys on the tab row's key, a waiting count in amber so it reads at a glance.
+        let mut x = cl - 6.0;
+        for (filter, count) in AgentFilter::ALL.into_iter().zip(s.agent_counts) {
+            let hit = Hit::AgentFilter(filter);
+            let label = format!("{} {count}", filter.label());
+            let width = self.text_width(&label, &self.fonts.caption_center) + 16.0;
+            let key = rect(x, SETTINGS_TOP - tokens::TAB_H / 2.0, x + width, SETTINGS_TOP + tokens::TAB_H / 2.0);
+            let current = s.agent_filter == filter;
+            let color = self.tab_key(key, if current { 1.0 } else { 0.0 }, s.hovered == Some(hit), a);
+            let color = match (current, filter == AgentFilter::Waiting && count > 0) {
+                (true, _) => p.text,
+                (false, true) => ORANGE,
+                (false, false) => color,
+            };
+            self.text(&label, &self.fonts.caption_center, key, color, a);
+            self.hit(key, hit);
+            x += width + 4.0;
         }
 
-        self.hit(rect(l - 6.0, AGENT_TOP, r + 6.0, AGENT_TOP + AGENT_ROW_H * VISIBLE_AGENTS as f32), Hit::AgentList);
-        for (index, session) in rows.iter().enumerate().skip(s.agent_scroll).take(VISIBLE_AGENTS) {
-            let top = AGENT_TOP + (index - s.agent_scroll) as f32 * AGENT_ROW_H;
-            let (y1, y2) = (top + 13.0, top + 28.0);
-            let row = rect(l - 6.0, top + 1.0, r + 6.0, top + AGENT_ROW_H - 1.0);
-            self.list_row(row, tokens::RADIUS_ROW, s.hovered == Some(Hit::AgentRow(index)), a);
-            self.hit(row, Hit::AgentRow(index));
-
-            let color = agent_color(session.state, p.accent, p.dim);
-            if session.state == AgentState::Running {
-                self.circle_outline(l + 4.0, y1, 3.2, 1.6, color, a);
-            } else {
-                self.circle(l + 4.0, y1, 3.5, color, a);
-            }
-            let status = agent_status(session);
-            let status_w = self.text_width(&status, &self.fonts.caption_end);
-            let status_color = if session.state == AgentState::Waiting { ORANGE } else { p.muted };
-            self.text(&status, &self.fonts.caption_end, rect(r - status_w - 2.0, y1 - 8.0, r, y1 + 8.0), status_color, a);
-            self.text(&session.title, &self.fonts.label, rect(l + 14.0, y1 - 10.0, r - status_w - 12.0, y1 + 10.0), p.text, a);
-
-            // Agent name in its tint, then project (and the waiting reason) in muted text.
-            let kind = session.kind.label();
-            let kind_w = self.text_width(kind, &self.fonts.caption);
-            self.text(kind, &self.fonts.caption, rect(l + 14.0, y2 - 8.0, l + 16.0 + kind_w, y2 + 8.0), rgb(session.kind.tint(), 1.0), a);
-            let mut parts = vec![session.project.as_str()];
-            if session.state == AgentState::Waiting {
-                parts.push(session.detail.as_str());
-            }
-            let rest: String = parts.into_iter().filter(|part| !part.is_empty()).map(|part| format!(" · {part}")).collect();
-            let folder_right = if !session.folder.is_empty() { r - 24.0 } else { r };
-            self.text(&rest, &self.fonts.caption, rect(l + 14.0 + kind_w, y2 - 8.0, folder_right, y2 + 8.0), p.muted, a);
-            if !session.folder.is_empty() && s.hovered == Some(Hit::AgentRow(index)) {
-                self.glyph(ICON_FOLDER, &self.fonts.icon_11, r - 9.0, y2, p.accent, a);
-                self.hit(rect(r - 21.0, y2 - 10.0, r + 3.0, y2 + 10.0), Hit::AgentFolder(index));
-            }
+        let mut top = SETTINGS_TOP + AGENT_LIST_GAP;
+        let used_up = s.agent_limits.iter().find_map(|limits| Some((limits, limits.meters.iter().find(|m| m.used >= 100)?)));
+        if let Some((limits, meter)) = used_up {
+            let banner = rect(cl - 6.0, top, r + 6.0, top + CONTROL_H);
+            let text = format!("{} used its {} limit · resets in {}", limits.kind.label(), meter.window, until(meter.resets_at, s.unix));
+            self.alert(banner, &text, RED, a);
+            top += CONTROL_H + 6.0;
         }
-        let hidden = rows.len().saturating_sub(s.agent_scroll + VISIBLE_AGENTS);
-        if hidden > 0 {
-            self.text(&format!("+{hidden} more"), &self.fonts.caption, rect(l, ROW_Y - 8.0, r - 110.0, ROW_Y + 8.0), p.muted, a);
+        let list = rect(cl - 6.0, top, r + 6.0, bottom - 6.0);
+        self.hit(list, Hit::AgentList);
+        if s.agent_list.is_empty() {
+            self.text("Nothing here right now", &self.fonts.caption_center, rect(cl, top + 24.0, r, top + 40.0), p.muted, a);
+            return;
         }
-        // Once every hook is in place the link turns into a quiet "Hooks on" marker, so the
-        // row stops asking for something already done.
-        let over = s.hovered == Some(Hit::AgentHooks);
+        self.push_clip(list);
+        let mut y = top;
+        for (index, session) in s.agent_list.iter().enumerate().skip(s.agent_scroll) {
+            if y >= list.bottom {
+                break;
+            }
+            y += self.agent_row(s, session, index, (cl, r), y, list.bottom, a);
+        }
+        self.pop_clip();
+    }
+
+    /// One agent session: its badge, title, and project, the state on the right, and while
+    /// open the detail line with Switch, Folder, and Dismiss. Returns the height it took.
+    #[allow(clippy::too_many_arguments)]
+    fn agent_row(&self, s: &Scene, session: &Session, index: usize, (l, r): (f32, f32), top: f32, limit: f32, a: f32) -> f32 {
+        let p = &self.pal;
+        let open = s.agent_open == Some(index);
+        let height = if open { AGENT_ROW_OPEN } else { AGENT_ROW };
+        let row = rect(l - 6.0, top + 1.0, r + 6.0, top + height - 1.0);
+        let head = rect(row.left, row.top, row.right, top + AGENT_ROW - 1.0);
+        let hit = Hit::AgentRow(index);
+        if open {
+            self.rounded(row, tokens::RADIUS_ROW, self.tint(tokens::FILL_GHOST), a);
+        }
+        self.list_row(head, tokens::RADIUS_ROW, s.hovered == Some(hit), a);
+        if head.bottom <= limit {
+            self.hit(head, hit);
+        }
+
+        let cy = top + AGENT_ROW / 2.0;
+        let tint = rgb(session.kind.tint(), 1.0);
+        let badge = rect(l, cy - 10.0, l + 20.0, cy + 10.0);
+        self.rounded(badge, tokens::RADIUS_KEY + 2.0, with_alpha(tint, 0.2), a);
+        self.text(&agent_tag(session.kind.label()), &self.fonts.tiny, badge, tint, a);
+
+        let status = agent_status(session);
+        let status_w = self.text_width(&status, &self.fonts.caption_end);
+        let waiting = session.state == AgentState::Waiting;
+        self.text(&status, &self.fonts.caption_end, rect(r - status_w - 2.0, cy - 8.0, r, cy + 8.0), if waiting { ORANGE } else { p.muted }, a);
+        let dot = r - status_w - 10.0;
+        let color = agent_color(session.state, p.accent, p.dim);
+        if session.state == AgentState::Running {
+            self.circle_outline(dot, cy, 3.2, 1.6, color, a);
+        } else {
+            self.circle(dot, cy, 3.5, color, a);
+        }
+        let text_r = dot - TIGHT;
+        self.text(&session.title, &self.fonts.label, rect(l + 30.0, cy - 17.0, text_r, cy + 1.0), p.text, a);
+        let mut line = session.project.clone();
+        if waiting && !session.detail.is_empty() {
+            line = if line.is_empty() { session.detail.clone() } else { format!("{line} · {}", session.detail) };
+        }
+        self.text(&line, &self.fonts.caption, rect(l + 30.0, cy + 1.0, text_r, cy + 17.0), p.muted, a);
+
+        if open {
+            let by = top + AGENT_ROW + (AGENT_ROW_OPEN - AGENT_ROW) / 2.0 - 3.0;
+            let mut actions: Vec<(&str, Hit, Style)> = Vec::new();
+            if matches!(session.state, AgentState::Done | AgentState::Idle) {
+                actions.push(("Dismiss", Hit::AgentDismiss(index), Style::Secondary));
+            }
+            if !session.folder.is_empty() {
+                actions.push(("Folder", Hit::AgentFolder(index), Style::Secondary));
+            }
+            if session.pid != 0 {
+                actions.push(("Switch", Hit::AgentSwitch(index), Style::Primary));
+            }
+            let mut x = r;
+            for (label, hit, style) in actions.into_iter().rev() {
+                let width = self.text_width(label, &self.fonts.label_center) + 24.0;
+                let button = rect(x - width, by - CONTROL_H / 2.0, x, by + CONTROL_H / 2.0);
+                self.chip(button, label, style, s.hovered == Some(hit), a);
+                if button.bottom <= limit {
+                    self.hit(button, hit);
+                }
+                x = button.left - 6.0;
+            }
+            let detail = if session.detail.is_empty() { format!("Last activity {} ago", age(session.age_secs)) } else { session.detail.clone() };
+            self.text(&detail, &self.fonts.caption, rect(l + 30.0, by - 8.0, x - TIGHT, by + 8.0), p.soft, a);
+        }
+        height
+    }
+
+    /// The Agents page's left column: each agent's plan windows as a bar with its share, the
+    /// reset time once a window runs low (or while hovered), and the hooks link at the foot.
+    fn agent_limits_column(&self, s: &Scene, l: f32, bottom: f32, a: f32) {
+        let p = &self.pal;
+        let r = l + AGENT_SIDE;
+        let mut y = SETTINGS_TOP;
+        self.text("Plan limits", &self.fonts.caption, rect(l, y - 8.0, r, y + 8.0), p.muted, a);
+        y += 22.0;
+        let foot = bottom - PAD;
+        if s.agent_limits.is_empty() {
+            self.text("Nothing reported yet", &self.fonts.caption, rect(l, y - 8.0, r, y + 8.0), p.soft, a);
+            self.text("Shown once reported", &self.fonts.caption, rect(l, y + 8.0, r, y + 24.0), p.dim, a);
+        }
+        let over = s.hovered == Some(Hit::AgentLimits);
+        let start = y;
+        for limits in s.agent_limits {
+            let needed = 18.0 + limits.meters.len() as f32 * AGENT_METER_PITCH;
+            if y + needed > foot - 16.0 {
+                break;
+            }
+            self.circle(l + 4.0, y, 3.5, rgb(limits.kind.tint(), 1.0), a);
+            self.text(limits.kind.label(), &self.fonts.label, rect(l + 14.0, y - 9.0, r, y + 9.0), p.text, a);
+            y += 18.0;
+            for meter in &limits.meters {
+                let color = limit_color(meter.used, p.accent);
+                self.text(&meter.window, &self.fonts.caption, rect(l, y - 8.0, l + AGENT_WINDOW_W, y + 8.0), p.muted, a);
+                self.bar_sized(l + AGENT_WINDOW_W, r - AGENT_SHARE_W - 4.0, y, 5.0, f32::from(meter.used) / 100.0, color, a);
+                // A window running low (or any, while hovered) shows when it resets instead of
+                // its share, so the column stays one line per window.
+                let tone = if meter.used >= LIMIT_WARN { color } else { p.muted };
+                let value = if meter.used >= LIMIT_WARN || over { format!("↻ {}", until(meter.resets_at, s.unix)) } else { format!("{}%", meter.used) };
+                self.text(&value, &self.fonts.caption_end, rect(r - AGENT_SHARE_W, y - 8.0, r, y + 8.0), tone, a);
+                y += AGENT_METER_PITCH;
+            }
+            y += 8.0;
+        }
+        if y > start {
+            self.hit(rect(l - 4.0, start - 12.0, r, y - 8.0), Hit::AgentLimits);
+        }
+        // The hooks link at the foot: an ask until every hook is in, then a quiet marker.
         let installed = s.agent_hooks.all();
+        let hooks_over = s.hovered == Some(Hit::AgentHooks);
         let label = if installed { "Hooks on" } else { "Install hooks" };
-        let color = if installed && !over { p.muted } else if over { p.text } else { p.accent };
-        let width = self.text_width(label, &self.fonts.caption_end) + 16.0;
-        self.text(label, &self.fonts.caption_end, rect(r - width, ROW_Y - 8.0, r, ROW_Y + 8.0), color, a);
-        self.hit(rect(r - width - 4.0, ROW_Y - 11.0, r + 4.0, ROW_Y + 11.0), Hit::AgentHooks);
+        let color = if hooks_over { p.text } else if installed { p.dim } else { p.accent };
+        let width = self.text_width(label, &self.fonts.caption);
+        self.text(label, &self.fonts.caption, rect(l, foot - 8.0, l + width + 2.0, foot + 8.0), color, a);
+        self.hit(rect(l - 4.0, foot - 11.0, l + width + 6.0, foot + 11.0), Hit::AgentHooks);
     }
 
     /// Unread mail from the connected Google account. Without an account the page holds the
@@ -1706,39 +1974,36 @@ impl Renderer {
             let width = self.text_width(label, &self.fonts.label_center) + 32.0;
             let button = rect(r - width, MAIL_SETUP_TITLE - CONTROL_H / 2.0, r, MAIL_SETUP_TITLE + CONTROL_H / 2.0);
             self.text(title, &self.fonts.title, rect(l, MAIL_SETUP_TITLE - 10.0, button.left - TIGHT, MAIL_SETUP_TITLE + 10.0), p.text, a);
-            let over = s.hovered == Some(Hit::GoogleConnect);
+            let id_ok = google_id_ok(&m.id);
+            let secret_ok = m.secret.trim().len() >= GOOGLE_SECRET_MIN;
             // Cancel, not a dead "Waiting…": Google refuses before redirecting often enough that
-            // waiting out the timeout would feel like a freeze.
-            self.chip(button, label, if m.connecting { Style::Secondary } else { Style::Primary }, over, a);
-            self.hit(button, Hit::GoogleConnect);
+            // waiting out the timeout would feel like a freeze. Connect waits for both boxes.
+            let style = if m.connecting { Style::Secondary } else { Style::Primary };
+            self.action_chip(s, button, label, style, Hit::GoogleConnect, m.connecting || (id_ok && secret_ok), a);
             // One line under the title: the last failure when there is one, so a refused sign-in
-            // is explained where the next attempt starts; otherwise what to paste.
+            // is explained where the next attempt starts; a wrong id next; otherwise what to paste.
             let hint = rect(l, MAIL_SETUP_HINT - 10.0, r, MAIL_SETUP_HINT + 10.0);
             match &m.status {
                 Some(status) => self.alert(hint, status, ORANGE, a),
-                None => self.text(
-                    "Desktop app client from Google Cloud Console · read-only",
-                    &self.fonts.caption,
-                    hint,
-                    p.muted,
-                    a,
-                ),
+                None if !m.id.trim().is_empty() && !id_ok => {
+                    self.text("The client id ends in .apps.googleusercontent.com", &self.fonts.caption, hint, RED, a)
+                }
+                None => self.text("Desktop app client from Google Cloud Console · read-only", &self.fonts.caption, hint, p.muted, a),
             }
             let id = rect(l, MAIL_SETUP_ID, r, MAIL_SETUP_ID + CONTROL_H);
-            let id_hit = Hit::GoogleClient(0);
             if m.editing == Some(0) {
                 self.typing_box(id, &m.id, "Client id", a);
             } else {
-                self.text_field(id, &m.id, "Client id (…apps.googleusercontent.com)", s.hovered == Some(id_hit), a);
-                self.hit(id, id_hit);
+                let hits = (Hit::GoogleClient(0), Hit::Paste(PasteTarget::GoogleId));
+                self.setup_field(s, id, (&m.id, "Client id (…apps.googleusercontent.com)"), hits, id_ok, false, a);
             }
+            // The secret is never shown, typed or not.
             let secret = rect(l, MAIL_SETUP_SECRET, r, MAIL_SETUP_SECRET + CONTROL_H);
-            let secret_hit = Hit::GoogleClient(1);
             if m.editing == Some(1) {
-                self.typing_box(secret, &m.secret, "Client secret", a);
+                self.typing_box(secret, &mask(&m.secret), "Client secret", a);
             } else {
-                self.text_field(secret, &m.secret, "Client secret", s.hovered == Some(secret_hit), a);
-                self.hit(secret, secret_hit);
+                let hits = (Hit::GoogleClient(1), Hit::Paste(PasteTarget::GoogleSecret));
+                self.setup_field(s, secret, (&m.secret, "Client secret"), hits, secret_ok, true, a);
             }
             return;
         }
@@ -1811,7 +2076,8 @@ impl Renderer {
                 "Add a .plugin file to the folder; its rows show up here",
                 a,
             );
-            self.empty_actions(s, l, r, &[("Open folder", Hit::PluginsFolder, Style::Primary)], a);
+            let actions = [("Add an example", Hit::PluginsExample, Style::Secondary), ("Open folder", Hit::PluginsFolder, Style::Primary)];
+            self.empty_actions(s, l, r, &actions, a);
             return;
         }
         let right = format!("{} plugins", list.count);
@@ -1828,21 +2094,29 @@ impl Renderer {
             let hit = Hit::PluginRow(i);
             let failed = i >= list.rows.len();
             let line = if row.detail.is_empty() && clickable { "opens in the browser" } else { row.detail.as_str() };
+            // A failed plugin carries its fix on the row: Retry runs the plugins again.
+            let retry_w = self.text_width("Retry", &self.fonts.label_center) + 24.0;
             let cell = Cell {
                 lead: 16.0,
                 title: &row.title,
                 title_color: if failed { ORANGE } else { p.text },
                 subtitle: line,
                 subtitle_color: p.muted,
-                subtitle_inset: 0.0,
-                trailing: &row.plugin,
+                subtitle_inset: if failed { retry_w + TIGHT } else { 0.0 },
+                trailing: if failed { "" } else { &row.plugin },
                 trailing_color: p.muted,
             };
-            let (area, y1, _) = self.list_cell(top, l, r, cell, clickable && s.hovered == Some(hit), a);
+            let (area, y1, _) = self.list_cell(top, l, r - if failed { retry_w + TIGHT } else { 0.0 }, cell, clickable && s.hovered == Some(hit), a);
             if clickable {
                 self.hit(area, hit);
             }
             self.circle(l + 4.0, y1, 3.5, if failed { RED } else { GREEN }, a);
+            if failed {
+                let cy = top + LIST_ROW_H / 2.0;
+                let button = rect(r - retry_w, cy - CONTROL_H / 2.0, r, cy + CONTROL_H / 2.0);
+                self.chip(button, "Retry", Style::Secondary, s.hovered == Some(Hit::PluginsReload), a);
+                self.hit(button, Hit::PluginsReload);
+            }
         }
         let hidden = total.saturating_sub(PLUGIN_ROWS);
         if hidden > 0 {
@@ -1854,57 +2128,381 @@ impl Renderer {
         self.hit(rect(l - 4.0, ROW_Y - 11.0, link.right + 4.0, ROW_Y + 11.0), Hit::PluginsFolder);
     }
 
-    /// Settings: theme swatches and size on top, then the most used switches. Each control sends
+    /// Tako, on the large panel like Settings: the setup sheet until an overlay link is saved;
+    /// then a sidebar with one section per overlay, and the chosen one on the right.
+    fn tako_page(&self, s: &Scene, x0: f32, x1: f32, a: f32) {
+        let p = &self.pal;
+        let (l, r) = (x0 + MARGIN, x1 - MARGIN);
+        let t = s.tako;
+        if t.setup {
+            self.header(s, Header { right: "", right_hit: None }, x1, a);
+            self.tako_setup(s, l, r, a);
+            return;
+        }
+
+        // Caption: the connection state with a status dot, so a stalled feed is noticed.
+        self.header(s, Header { right: &t.status, right_hit: None }, x1, a);
+        let width = self.text_width(&t.status, &self.fonts.caption_end).min(caption_reserve(s.width - 2.0 * MARGIN));
+        let dot = match (t.live, t.failing) {
+            (true, _) => GREEN,
+            (false, true) => ORANGE,
+            (false, false) => p.dim,
+        };
+        self.circle(r - width - 10.0, TOP_Y, 3.0, dot, a);
+
+        // Sidebar, as on Settings.
+        for (i, section) in TakoSection::ALL.into_iter().enumerate() {
+            let cy = SETTINGS_TOP + i as f32 * TAKO_SECTION_PITCH;
+            let key = rect(l - 6.0, cy - TAKO_SECTION_H / 2.0, l + SETTINGS_SIDEBAR, cy + TAKO_SECTION_H / 2.0);
+            let hit = Hit::TakoSection(section);
+            let current = t.section == section;
+            let color = self.tab_key(key, if current { 1.0 } else { 0.0 }, s.hovered == Some(hit), a);
+            self.glyph(section.icon(), &self.fonts.icon_13, l + 6.0, cy, color, a);
+            let label = rect(l + 20.0, cy - 9.0, key.right - 4.0, cy + 9.0);
+            self.text(section.label(), &self.fonts.label, label, if current { p.text } else { color }, a);
+            self.hit(key, hit);
+        }
+        let bottom = tokens::DECK_BOTTOM + (s.height - View::Panel.size().1).max(0.0) - PAD;
+        self.separator(l + SETTINGS_SIDEBAR + SETTINGS_GAP / 2.0, tokens::DECK_TOP + PAD, bottom, a);
+
+        // The section: its title with a short summary on the right, then its content.
+        let cl = l + SETTINGS_SIDEBAR + SETTINGS_GAP;
+        let summary = match t.section {
+            TakoSection::Recent => count(t.gifts.len(), "this session"),
+            TakoSection::Top => String::new(),
+            TakoSection::Goal => t.goal.as_ref().map(|g| format!("{:.0}%", g.fraction * 100.0)).unwrap_or_default(),
+            TakoSection::Songs => count(t.songs.len(), "in queue"),
+            TakoSection::Poll => count(t.poll.len(), "options"),
+            TakoSection::Timer => String::new(),
+            TakoSection::Vip => count(t.vips.len(), "waiting"),
+        };
+        let summary_w = self.text_width(&summary, &self.fonts.caption_end).min(160.0);
+        let title = rect(cl, SETTINGS_TOP - 11.0, r - summary_w - TIGHT, SETTINGS_TOP + 11.0);
+        self.text(t.section.label(), &self.fonts.title, title, p.text, a);
+        self.text(&summary, &self.fonts.caption_end, rect(r - summary_w - 2.0, SETTINGS_TOP - 8.0, r, SETTINGS_TOP + 8.0), p.muted, a);
+        let empty = rect(cl, TAKO_CONTENT, r, bottom);
+        match t.section {
+            TakoSection::Recent if t.gifts.is_empty() => {
+                self.empty_state(empty, Some(ICON_HEART), "No donations yet", "New ones show up here and as a notice", a)
+            }
+            TakoSection::Recent => self.tako_rows(s, &t.gifts, cl, r, false, a),
+            TakoSection::Top if t.board.is_empty() => {
+                self.empty_state(empty, Some(ICON_STAR), "No leaderboard yet", "Top supporters show up here", a)
+            }
+            TakoSection::Top => self.tako_board(&t.board, cl, r, a),
+            TakoSection::Goal => match &t.goal {
+                None => self.empty_state(empty, Some(ICON_FLAG), "No milestone", "Add one in the Tako dashboard", a),
+                Some(goal) => self.tako_goal(goal, cl, r, a),
+            },
+            TakoSection::Songs if t.songs.is_empty() => {
+                self.empty_state(empty, Some(ICON_MUSIC), "No songs waiting", "Song requests queue up here", a)
+            }
+            TakoSection::Songs => self.tako_rows(s, &t.songs, cl, r, true, a),
+            TakoSection::Poll if t.poll.is_empty() => {
+                self.empty_state(empty, Some(ICON_LIST), "No poll running", "Set the options in the Tako dashboard", a)
+            }
+            TakoSection::Poll => self.tako_poll(&t.poll, cl, r, a),
+            TakoSection::Timer => match &t.timer {
+                None => self.empty_state(empty, Some(ICON_TIMER), "No timer set", "Start one in the Tako dashboard", a),
+                Some((big, line)) => {
+                    let cy = TAKO_CONTENT + 44.0;
+                    self.text(big, &self.fonts.big_num, rect(cl, cy - 22.0, r, cy + 22.0), p.text, a);
+                    self.text(line, &self.fonts.caption, rect(cl, cy + 30.0, r, cy + 46.0), p.muted, a);
+                }
+            },
+            TakoSection::Vip if t.vips.is_empty() => {
+                self.empty_state(empty, Some(ICON_PEOPLE), "Nobody in the queue", "VIP requests line up here", a)
+            }
+            TakoSection::Vip => self.tako_rows(s, &t.vips, cl, r, true, a),
+        }
+    }
+
+    /// The player: who sent the video and what it is in the top row, with Browser and Close on
+    /// the right, then the video slot. The video itself is Edge's window, docked over the slot by
+    /// the app once the shape has settled; the slot is what shows while it loads or moves.
+    fn player_page(&self, s: &Scene, player: &PlayerView, x0: f32, x1: f32, a: f32) {
+        let p = &self.pal;
+        let (l, r) = (x0 + PLAYER_SIDE, x1 - PLAYER_SIDE);
+        let cy = tokens::TABS_Y;
+        // Close and Browser on the right, as icon buttons the size of a tab key.
+        let close = (r - 10.0, Hit::PlayerClose, ICON_CLOSE);
+        let browser = (r - 10.0 - tokens::TAB_SLOT - 4.0, Hit::PlayerBrowser, ICON_GLOBE);
+        for (cx, hit, icon) in [close, browser] {
+            let over = s.hovered == Some(hit);
+            self.icon_button(cx, cy, 11.0, over, a);
+            self.glyph(icon, &self.fonts.icon_11, cx, cy, if over { p.text } else { p.soft }, a);
+            self.hit(rect(cx - 12.0, cy - 12.0, cx + 12.0, cy + 12.0), hit);
+        }
+        let text_r = browser.0 - 18.0;
+        // A play glyph while the video loads, the music wave once it plays.
+        if player.ready {
+            self.wave(l + 6.0, cy, s.seconds, p.accent, a);
+        } else {
+            self.glyph(ICON_PLAY, &self.fonts.icon_11, l + 6.0, cy, p.accent, a);
+        }
+        let name_w = self.text_width(&player.name, &self.fonts.label).min((text_r - l) * 0.45);
+        self.text(&player.name, &self.fonts.label, rect(l + 20.0, cy - 9.0, l + 22.0 + name_w, cy + 9.0), p.text, a);
+        self.text(&player.line, &self.fonts.caption, rect(l + 30.0 + name_w, cy - 8.0, text_r, cy + 8.0), p.muted, a);
+
+        let slot = player_slot(x1 - x0);
+        let slot = rect(slot.left, slot.top, slot.right, slot.bottom);
+        self.rounded(slot, PLAYER_RADIUS, rgb(0x000000, 1.0), a);
+        if !player.ready {
+            // Three dots brighten in turn above the caption while Edge opens the page.
+            let mid = (slot.top + slot.bottom) / 2.0;
+            for i in 0..3 {
+                let wave = (0.5 + 0.5 * (s.seconds * LOADING_SPEED - i as f64 * LOADING_STAGGER).sin()) as f32;
+                let cx = (l + r) / 2.0 + (i as f32 - 1.0) * 12.0;
+                // The slot is black in every theme, so the dots are white rather than a theme colour.
+                self.circle(cx, mid - 10.0 - 2.0 * wave, 3.0, WHITE, a * (0.25 + 0.55 * wave));
+            }
+            self.text("Loading video…", &self.fonts.caption_center, rect(l, mid + 2.0, r, mid + 18.0), p.muted, a);
+        }
+    }
+
+    /// The setup sheet: the same layout as the Google setup, across the whole deck.
+    fn tako_setup(&self, s: &Scene, l: f32, r: f32, a: f32) {
+        let p = &self.pal;
+        let t = s.tako;
+        let width = self.text_width("Connect", &self.fonts.label_center) + 32.0;
+        let button = rect(r - width, MAIL_SETUP_TITLE - CONTROL_H / 2.0, r, MAIL_SETUP_TITLE + CONTROL_H / 2.0);
+        let title = rect(l, MAIL_SETUP_TITLE - 10.0, button.left - TIGHT, MAIL_SETUP_TITLE + 10.0);
+        self.text("Connect Tako", &self.fonts.title, title, p.text, a);
+        // Connect waits for a link that has an overlay key in it; typing is checked as it goes.
+        let valid = crate::feeds::tako::parse_key(&t.link).is_some();
+        self.action_chip(s, button, "Connect", Style::Primary, Hit::TakoConnect, valid || t.editing, a);
+        let hint = rect(l, MAIL_SETUP_HINT - 10.0, r, MAIL_SETUP_HINT + 10.0);
+        match &t.problem {
+            Some(problem) => self.alert(hint, problem, ORANGE, a),
+            None if !t.editing && !t.link.trim().is_empty() && !valid => {
+                self.text("No overlay key in this link · copy one from the Tako dashboard", &self.fonts.caption, hint, RED, a)
+            }
+            None => self.text("Any overlay link from the Tako dashboard · read-only", &self.fonts.caption, hint, p.muted, a),
+        }
+        let field = rect(l, MAIL_SETUP_ID, r, MAIL_SETUP_ID + CONTROL_H);
+        if t.editing {
+            self.typing_box(field, &t.link, "Overlay link", a);
+        } else {
+            let hits = (Hit::TakoKey, Hit::Paste(PasteTarget::TakoLink));
+            self.setup_field(s, field, (&t.link, "tako.id/overlay/alert?overlay_key=…"), hits, valid, false, a);
+        }
+        let note = MAIL_SETUP_ID + CONTROL_H + 18.0;
+        let line = "Crest only reads the overlay: OBS still plays every alert.";
+        self.text(line, &self.fonts.caption, rect(l, note - 8.0, r, note + 8.0), p.dim, a);
+    }
+
+    /// Two-line rows (donations, songs, VIP entries), three in the room. A row with a link opens
+    /// it; `numbered` puts the position in the lead circle instead of initials.
+    fn tako_rows(&self, s: &Scene, rows: &[TakoRow], l: f32, r: f32, numbered: bool, a: f32) {
+        let p = &self.pal;
+        for (i, row) in rows.iter().take(TAKO_LIST_ROWS).enumerate() {
+            let top = TAKO_CONTENT + i as f32 * LIST_ROW_H;
+            let hit = Hit::TakoRow(i);
+            let link = !row.url.is_empty();
+            let cell = Cell {
+                lead: 34.0,
+                title: &row.name,
+                title_color: p.text,
+                subtitle: &row.message,
+                subtitle_color: p.muted,
+                subtitle_inset: if link { 18.0 } else { 0.0 },
+                trailing: &row.value,
+                trailing_color: if numbered { p.muted } else { p.accent },
+            };
+            let over = link && s.hovered == Some(hit);
+            let (area, _, y2) = self.list_cell(top, l, r, cell, over, a);
+            let (cx, cy) = (l + 12.0, top + LIST_ROW_H / 2.0);
+            let (fill, ink) = if numbered && i == 0 { (p.accent, p.on_accent) } else { (self.tint(tokens::FILL_STRONG), p.soft) };
+            self.circle(cx, cy, 12.0, fill, a);
+            let lead = if numbered { format!("{}", i + 1) } else { row.initials.clone() };
+            self.text(&lead, &self.fonts.tiny, rect(cx - 12.0, cy - 8.0, cx + 12.0, cy + 8.0), ink, a);
+            if link {
+                self.glyph(ICON_PLAY, &self.fonts.icon_11, r - 6.0, y2, if over { p.accent } else { p.dim }, a);
+                self.hit(area, hit);
+            }
+        }
+        let hidden = rows.len().saturating_sub(TAKO_LIST_ROWS);
+        if hidden > 0 {
+            let y = TAKO_CONTENT + TAKO_LIST_ROWS as f32 * LIST_ROW_H + 8.0;
+            self.text(&format!("+{hidden} more"), &self.fonts.caption_end, rect(r - 120.0, y - 8.0, r, y + 8.0), p.muted, a);
+        }
+    }
+
+    /// Leaderboard: four ranks, the first on the accent.
+    fn tako_board(&self, board: &[(String, String)], l: f32, r: f32, a: f32) {
+        let p = &self.pal;
+        for (i, (name, amount)) in board.iter().take(TAKO_LINES).enumerate() {
+            let cy = TAKO_CONTENT + 16.0 + i as f32 * TAKO_LINE_PITCH;
+            let (fill, ink) = if i == 0 { (p.accent, p.on_accent) } else { (self.tint(tokens::FILL_STRONG), p.soft) };
+            self.circle(l + 11.0, cy, 11.0, fill, a);
+            self.text(&format!("{}", i + 1), &self.fonts.tiny, rect(l, cy - 8.0, l + 22.0, cy + 8.0), ink, a);
+            let amount_w = self.text_width(amount, &self.fonts.label_end).min(160.0);
+            self.text(name, &self.fonts.label, rect(l + 34.0, cy - 9.0, r - amount_w - TIGHT, cy + 9.0), p.text, a);
+            self.text(amount, &self.fonts.label_end, rect(r - amount_w - 2.0, cy - 9.0, r, cy + 9.0), if i == 0 { p.accent } else { p.soft }, a);
+            if i + 1 < board.len().min(TAKO_LINES) {
+                let y = cy + TAKO_LINE_PITCH / 2.0;
+                self.rounded(rect(l + 34.0, y - 0.5, r, y + 0.5), 0.5, self.tint(tokens::DIVIDER), a);
+            }
+        }
+    }
+
+    /// Milestone: the step, the amount raised against its target, and a progress bar.
+    fn tako_goal(&self, goal: &TakoGoal, l: f32, r: f32, a: f32) {
+        let p = &self.pal;
+        let y = TAKO_CONTENT + 14.0;
+        let title = if goal.title.is_empty() { "Next step" } else { goal.title.as_str() };
+        self.text(title, &self.fonts.label, rect(l, y - 9.0, r, y + 9.0), p.soft, a);
+        let y = TAKO_CONTENT + 50.0;
+        let current_w = self.text_width(&goal.current, &self.fonts.big_num).min(r - l);
+        self.text(&goal.current, &self.fonts.big_num, rect(l, y - 22.0, l + current_w + 2.0, y + 22.0), p.text, a);
+        let target = format!("of {}", goal.target);
+        self.text(&target, &self.fonts.body, rect(l + current_w + 10.0, y - 4.0, r, y + 14.0), p.muted, a);
+        self.bar_sized(l, r, TAKO_CONTENT + 92.0, 8.0, goal.fraction, p.accent, a);
+    }
+
+    /// Poll: each option with its share as a thin bar under the name.
+    fn tako_poll(&self, poll: &[(String, String, f32)], l: f32, r: f32, a: f32) {
+        let p = &self.pal;
+        let leader = poll.iter().map(|(_, _, share)| *share).fold(0.0, f32::max);
+        for (i, (name, amount, share)) in poll.iter().take(TAKO_LINES).enumerate() {
+            let cy = TAKO_CONTENT + 16.0 + i as f32 * TAKO_LINE_PITCH;
+            let percent = format!("{:.0}% · {amount}", share * 100.0);
+            let percent_w = self.text_width(&percent, &self.fonts.caption_end).min(180.0);
+            let leading = *share > 0.0 && *share >= leader;
+            self.text(name, &self.fonts.label, rect(l, cy - 14.0, r - percent_w - TIGHT, cy + 4.0), p.text, a);
+            self.text(&percent, &self.fonts.caption_end, rect(r - percent_w - 2.0, cy - 13.0, r, cy + 3.0), p.muted, a);
+            self.bar_sized(l, r, cy + 9.0, 4.0, *share, if leading { p.accent } else { p.soft }, a);
+        }
+    }
+
+    /// Settings, laid out like a system settings window: a sidebar of sections on the left and
+    /// the chosen section on the right, one titled group of rows at a time. Every control sends
     /// the same command as its tray menu entry; rarer options stay in the tray menu.
     fn settings_page(&self, s: &Scene, x0: f32, x1: f32, a: f32) {
         let p = &self.pal;
         let (l, r) = (x0 + MARGIN, x1 - MARGIN);
-        let st = &s.settings;
         self.header(s, Header { right: "", right_hit: None }, x1, a);
 
-        // Theme: each body color with its accent inside; the current one has an accent ring.
-        let y = SETTINGS_ROWS[0];
-        self.text("Theme", &self.fonts.caption, rect(l, y - 8.0, l + 56.0, y + 8.0), p.muted, a);
+        // Sidebar: one key per section, the current one on the same accent key as the tab row.
+        for (i, section) in SettingsSection::ALL.into_iter().enumerate() {
+            let cy = SETTINGS_TOP + i as f32 * SETTINGS_SECTION_PITCH;
+            let key = rect(l - 6.0, cy - SETTINGS_SECTION_H / 2.0, l + SETTINGS_SIDEBAR, cy + SETTINGS_SECTION_H / 2.0);
+            let hit = Hit::SettingsSection(section);
+            let current = s.settings_section == section;
+            let color = self.tab_key(key, if current { 1.0 } else { 0.0 }, s.hovered == Some(hit), a);
+            self.glyph(section.icon(), &self.fonts.icon_13, l + 6.0, cy, color, a);
+            let label = rect(l + 20.0, cy - 9.0, key.right - 4.0, cy + 9.0);
+            self.text(section.label(), &self.fonts.label, label, if current { p.text } else { color }, a);
+            self.hit(key, hit);
+        }
+        let bottom = tokens::DECK_BOTTOM + (s.height - View::Panel.size().1).max(0.0);
+        let version = concat!("Crest ", env!("CARGO_PKG_VERSION"));
+        self.text(version, &self.fonts.tiny, rect(l, bottom - PAD - 16.0, l + SETTINGS_SIDEBAR, bottom - PAD), p.dim, a);
+        let line = l + SETTINGS_SIDEBAR + SETTINGS_GAP / 2.0;
+        self.separator(line, tokens::DECK_TOP + PAD, bottom - PAD, a);
+
+        // The section: a title and one line saying what it covers, then its rows.
+        let cl = l + SETTINGS_SIDEBAR + SETTINGS_GAP;
+        let section = s.settings_section;
+        self.text(section.title(), &self.fonts.title, rect(cl, SETTINGS_TOP - 11.0, r, SETTINGS_TOP + 11.0), p.text, a);
+        let about = rect(cl, SETTINGS_ABOUT - 8.0, r, SETTINGS_ABOUT + 8.0);
+        self.text(section.about(), &self.fonts.caption, about, p.muted, a);
+        match section {
+            SettingsSection::Look => self.settings_look(s, cl, r, a),
+            SettingsSection::Features => self.settings_features(s, cl, r, a),
+            SettingsSection::Prayer => self.settings_prayer(s, cl, r, a),
+            SettingsSection::Agents => self.settings_agents(s, cl, r, a),
+            SettingsSection::Tako => self.settings_tako(s, cl, r, a),
+        }
+    }
+
+    /// Centre line of the `i`-th row of a settings section.
+    fn settings_row_y(i: usize) -> f32 {
+        SETTINGS_ROWS_TOP + i as f32 * SETTINGS_ROW_PITCH
+    }
+
+    /// One settings row: its name on the left, a hairline under it unless it is the last. The
+    /// control on the right is the caller's.
+    #[allow(clippy::too_many_arguments)]
+    fn settings_row(&self, l: f32, r: f32, i: usize, last: bool, label: &str, online: bool, a: f32) {
+        let p = &self.pal;
+        let cy = Self::settings_row_y(i);
+        let width = self.text_width(label, &self.fonts.label).min(r - l - 140.0);
+        self.text(label, &self.fonts.label, rect(l, cy - 9.0, l + width + 2.0, cy + 9.0), p.text, a);
+        if online {
+            self.glyph(ICON_GLOBE, &self.fonts.icon_9, l + width + 12.0, cy, p.muted, a);
+        }
+        if !last {
+            let y = cy + SETTINGS_ROW_PITCH / 2.0;
+            self.rounded(rect(l, y - 0.5, r, y + 0.5), 0.5, self.tint(tokens::DIVIDER), a);
+        }
+    }
+
+    /// A row that is one switch: the whole row is the click target and fills softly on hover.
+    #[allow(clippy::too_many_arguments)]
+    fn settings_switch(&self, s: &Scene, l: f32, r: f32, i: usize, last: bool, switch: SettingsSwitch, a: f32) {
+        let (label, on, online, command) = switch;
+        let cy = Self::settings_row_y(i);
+        let hit = Hit::Command(command);
+        let area = rect(l - 6.0, cy - SETTINGS_ROW_PITCH / 2.0 + 2.0, r + 6.0, cy + SETTINGS_ROW_PITCH / 2.0 - 2.0);
+        self.list_row(area, tokens::RADIUS_ROW, s.hovered == Some(hit), a);
+        self.settings_row(l, r, i, last, label, online, a);
+        self.switch(rect(r - SWITCH_W, cy - SWITCH_H / 2.0, r, cy + SWITCH_H / 2.0), on, a);
+        self.hit(area, hit);
+    }
+
+    /// Appearance: theme, size, and how notices behave.
+    fn settings_look(&self, s: &Scene, l: f32, r: f32, a: f32) {
+        let p = &self.pal;
+        let st = &s.settings;
+        // Theme: each body colour with its accent inside; the current one has an accent ring.
+        self.settings_row(l, r, 0, false, "Theme", false, a);
+        let cy = Self::settings_row_y(0);
+        let count = Theme::ALL.len() as f32;
         for (i, theme) in Theme::ALL.into_iter().enumerate() {
-            let cx = l + 66.0 + i as f32 * SWATCH_PITCH;
+            let cx = r - 13.0 - (count - 1.0 - i as f32) * SWATCH_PITCH;
             let hit = Hit::Command(Command::Theme(theme));
             let look = palette(theme);
             if st.theme == theme {
-                self.circle_outline(cx, y, 13.0, 1.6, p.accent, a);
+                self.circle_outline(cx, cy, 12.0, 1.6, p.accent, a);
             } else if s.hovered == Some(hit) {
-                self.circle_outline(cx, y, 13.0, 1.2, self.tint(tokens::TRACK), a);
+                self.circle_outline(cx, cy, 12.0, 1.2, self.tint(tokens::TRACK), a);
             }
-            self.circle(cx, y, 10.0, D2D1_COLOR_F { a: 1.0, ..look.body }, a);
-            self.circle_outline(cx, y, 10.0, 1.0, self.tint(tokens::DIVIDER), a);
-            self.circle(cx, y, 4.0, look.accent, a);
-            self.hit(rect(cx - 14.0, y - 14.0, cx + 14.0, y + 14.0), hit);
+            self.circle(cx, cy, 9.0, D2D1_COLOR_F { a: 1.0, ..look.body }, a);
+            self.circle_outline(cx, cy, 9.0, 1.0, self.tint(tokens::DIVIDER), a);
+            self.circle(cx, cy, 3.5, look.accent, a);
+            self.hit(rect(cx - 13.0, cy - 13.0, cx + 13.0, cy + 13.0), hit);
         }
-
-        // Size: a small segmented control at the right end of the theme row.
-        let sizes = [(Size::Small, "S"), (Size::Medium, "M"), (Size::Large, "L")]
-            .map(|(size, short)| (short, Hit::Command(Command::Size(size)), st.size == size));
+        self.settings_row(l, r, 1, false, "Size", false, a);
+        let sizes = Size::ALL.map(|size| (size.label(), Hit::Command(Command::Size(size)), st.size == size));
         let track_w = self.segment_widths(&sizes).iter().sum::<f32>() + 4.0;
-        self.segmented(s, r - track_w, y, &sizes, a);
-        self.text("Size", &self.fonts.caption_end, rect(r - track_w - 60.0, y - 8.0, r - track_w - TIGHT, y + 8.0), p.muted, a);
+        self.segmented(s, r - track_w, Self::settings_row_y(1), &sizes, a);
+        self.settings_switch(s, l, r, 2, false, ("Notification sounds", st.sound, false, Command::ToggleSound), a);
+        self.settings_switch(s, l, r, 3, true, ("Compact indicators", st.compact_hud, false, Command::ToggleCompactHud), a);
+    }
 
-        // Feature switches, three per row. The globe marks the ones that use the internet.
-        let switches = [
+    /// Feature switches in two columns of cards. The globe marks the ones that use the internet.
+    fn settings_features(&self, s: &Scene, l: f32, r: f32, a: f32) {
+        let p = &self.pal;
+        let st = &s.settings;
+        let switches: [SettingsSwitch; 8] = [
             ("Lyrics", st.lyrics, true, Command::ToggleLyrics),
             ("Weather", st.weather, true, Command::ToggleWeather),
-            ("Mail", st.mail, true, Command::ToggleMail),
             ("Calendar", st.calendar, false, Command::ToggleCalendar),
-            ("Google Cal", st.google_calendar, true, Command::ToggleGoogleCalendar),
+            ("Google Calendar", st.google_calendar, true, Command::ToggleGoogleCalendar),
+            ("Mail", st.mail, true, Command::ToggleMail),
+            ("Tako donations", st.tako, true, Command::ToggleTako),
             ("Plugins", st.plugins, false, Command::TogglePlugins),
+            ("Screenshots", st.screenshots, false, Command::ToggleScreenshots),
         ];
-        let width = (r - l - 2.0 * TIGHT) / 3.0;
+        let width = (r - l - TIGHT) / 2.0;
         for (i, (label, on, online, command)) in switches.into_iter().enumerate() {
-            let x = l + (i % 3) as f32 * (width + TIGHT);
-            let cy = if i < 3 { SETTINGS_ROWS[1] } else { SETTINGS_ROWS[2] };
-            let area = rect(x, cy - CONTROL_H / 2.0, x + width, cy + CONTROL_H / 2.0);
+            let x = l + (i % 2) as f32 * (width + TIGHT);
+            let cy = Self::settings_row_y(i / 2);
+            let area = rect(x, cy - SETTINGS_CARD_H / 2.0, x + width, cy + SETTINGS_CARD_H / 2.0);
             let hit = Hit::Command(command);
-            let over = s.hovered == Some(hit);
-            self.card(area, tokens::RADIUS_ROW, over, a);
-            let knob = rect(area.right - 30.0, cy - 6.0, area.right - 10.0, cy + 6.0);
+            self.card(area, tokens::RADIUS_ROW, s.hovered == Some(hit), a);
+            let knob = rect(area.right - SWITCH_W - 8.0, cy - SWITCH_H / 2.0, area.right - 8.0, cy + SWITCH_H / 2.0);
             let mut text_right = knob.left - 6.0;
             if online {
                 self.glyph(ICON_GLOBE, &self.fonts.icon_9, knob.left - 10.0, cy, p.muted, a);
@@ -1914,44 +2512,92 @@ impl Renderer {
             self.switch(knob, on, a);
             self.hit(area, hit);
         }
+    }
 
-        // Prayer times: the calculation method steps through on click, the Asr school beside it.
-        let cy = SETTINGS_ROWS[3];
-        self.text("Prayer", &self.fonts.caption, rect(l, cy - 8.0, l + 76.0, cy + 8.0), p.muted, a);
+    /// Prayer times: calculation method, Asr school, and the reminder before each azan.
+    fn settings_prayer(&self, s: &Scene, l: f32, r: f32, a: f32) {
+        let st = &s.settings;
+        self.settings_row(l, r, 0, false, "Method", false, a);
+        let cy = Self::settings_row_y(0);
         let method = st.prayer_method.label();
         let width = self.text_width(method, &self.fonts.label_center) + 28.0;
-        let chip = rect(l + 82.0, cy - CONTROL_H / 2.0, l + 82.0 + width, cy + CONTROL_H / 2.0);
+        let chip = rect(r - width, cy - CONTROL_H / 2.0, r, cy + CONTROL_H / 2.0);
         let hit = Hit::Command(Command::PrayerMethod(st.prayer_method.next()));
         self.chip(chip, method, Style::Secondary, s.hovered == Some(hit), a);
         self.hit(chip, hit);
+
+        self.settings_row(l, r, 1, false, "Asr", false, a);
         let schools = prayer::Madhab::ALL.map(|m| (m.label(), Hit::Command(Command::PrayerMadhab(m)), st.prayer_madhab == m));
         let track_w = self.segment_widths(&schools).iter().sum::<f32>() + 4.0;
-        self.segmented(s, r - track_w, cy, &schools, a);
-        self.text("Asr", &self.fonts.caption_end, rect(chip.right + TIGHT, cy - 8.0, r - track_w - TIGHT, cy + 8.0), p.muted, a);
+        self.segmented(s, r - track_w, Self::settings_row_y(1), &schools, a);
 
-        // Hook installation is provider-specific and explicit. Codex and omp already expose
-        // bounded local session records, so they need no configuration here.
-        let cy = SETTINGS_ROWS[4];
-        self.text("Agent hooks", &self.fonts.caption, rect(l, cy - 8.0, l + 76.0, cy + 8.0), p.muted, a);
+        self.settings_row(l, r, 2, true, "Remind", false, a);
+        let labels = prayer::LEADS.map(|lead| if lead == 0 { "Azan".to_string() } else { format!("{lead}m") });
+        let leads: Vec<(&str, Hit, bool)> = prayer::LEADS
+            .iter()
+            .zip(&labels)
+            .map(|(lead, label)| (label.as_str(), Hit::Command(Command::PrayerLead(*lead)), st.prayer_lead == *lead))
+            .collect();
+        let track_w = self.segment_widths(&leads).iter().sum::<f32>() + 4.0;
+        self.segmented(s, r - track_w, Self::settings_row_y(2), &leads, a);
+    }
+
+    /// Tako: the connection on top (turn on, set up, or disconnect), then which donations
+    /// become notices and whether those show the donor's message.
+    fn settings_tako(&self, s: &Scene, l: f32, r: f32, a: f32) {
+        let p = &self.pal;
+        let st = &s.settings;
+        self.settings_row(l, r, 0, false, "Overlay", true, a);
+        let cy = Self::settings_row_y(0);
+        let (label, hit, status) = match (st.tako, s.tako.setup) {
+            (false, _) => ("Turn on", Hit::Command(Command::ToggleTako), "Off"),
+            (true, true) => ("Set up…", Hit::Command(Command::TakoOpen), "No link yet"),
+            (true, false) => ("Disconnect", Hit::TakoDisconnect, s.tako.status.as_str()),
+        };
+        let style = if hit == Hit::TakoDisconnect { Style::Secondary } else { Style::Primary };
+        let width = self.text_width(label, &self.fonts.label_center) + 28.0;
+        let chip = rect(r - width, cy - CONTROL_H / 2.0, r, cy + CONTROL_H / 2.0);
+        self.chip(chip, label, style, s.hovered == Some(hit), a);
+        self.hit(chip, hit);
+        let color = match (st.tako, s.tako.live, s.tako.failing) {
+            (true, true, _) => GREEN,
+            (true, false, true) => ORANGE,
+            _ => p.muted,
+        };
+        self.text(status, &self.fonts.caption_end, rect(l + 90.0, cy - 8.0, chip.left - TIGHT, cy + 8.0), color, a);
+        self.settings_switch(s, l, r, 1, false, ("Donation notices", st.tako_alerts, false, Command::ToggleTakoAlerts), a);
+        self.settings_switch(s, l, r, 2, false, ("Soundboard notices", st.tako_sounds, false, Command::ToggleTakoSounds), a);
+        self.settings_switch(s, l, r, 3, true, ("Show donor messages", st.tako_messages, false, Command::ToggleTakoMessages), a);
+    }
+
+    /// Coding agents: notices, and the lifecycle hook for each tool that needs one. Codex and
+    /// omp already expose bounded local session records, so they need no hook.
+    fn settings_agents(&self, s: &Scene, l: f32, r: f32, a: f32) {
+        let p = &self.pal;
+        let st = &s.settings;
+        self.settings_switch(s, l, r, 0, false, ("Agent notices", st.agent_notices, false, Command::ToggleAgentNotices), a);
         use crate::feeds::agents::Provider;
-        let providers = [Provider::Claude, Provider::Cursor, Provider::Copilot];
-        let gap = TIGHT;
-        let start = l + 82.0;
-        let width = (r - start - gap * 2.0) / 3.0;
-        for (i, provider) in providers.into_iter().enumerate() {
-            let x = start + i as f32 * (width + gap);
-            let area = rect(x, cy - CONTROL_H / 2.0, x + width, cy + CONTROL_H / 2.0);
+        for (i, provider) in Provider::ALL.into_iter().enumerate() {
+            let row = i + 1;
+            let last = i + 1 == Provider::ALL.len();
+            self.settings_row(l, r, row, last, &format!("{} hook", provider.label()), false, a);
+            let cy = Self::settings_row_y(row);
             let hit = Hit::AgentHook(provider);
             let over = s.hovered == Some(hit);
-            // An installed hook is marked with a check, so it is clear which tools report here.
-            let on = s.agent_hooks.get(&provider.kind());
-            self.card(area, tokens::RADIUS_ROW, over, a);
-            let color = if over { p.text } else if on { p.accent } else { p.soft };
-            self.text(provider.label(), &self.fonts.caption_center, area, color, a);
-            if on {
-                self.glyph(ICON_CHECK, &self.fonts.icon_9, area.right - 9.0, cy, p.accent, a);
+            // Installing again is harmless (it merges), so an installed hook stays clickable.
+            if s.agent_hooks.get(&provider.kind()) {
+                let width = self.text_width("Installed", &self.fonts.caption_end) + 24.0;
+                let area = rect(r - width, cy - CONTROL_H / 2.0, r, cy + CONTROL_H / 2.0);
+                self.list_row(area, CONTROL_H / 2.0, over, a);
+                self.glyph(ICON_CHECK, &self.fonts.icon_9, area.left + 9.0, cy, p.accent, a);
+                self.text("Installed", &self.fonts.caption_end, rect(area.left + 16.0, cy - 8.0, r - 4.0, cy + 8.0), p.accent, a);
+                self.hit(area, hit);
+            } else {
+                let width = self.text_width("Install", &self.fonts.label_center) + 28.0;
+                let chip = rect(r - width, cy - CONTROL_H / 2.0, r, cy + CONTROL_H / 2.0);
+                self.chip(chip, "Install", Style::Secondary, over, a);
+                self.hit(chip, hit);
             }
-            self.hit(area, hit);
         }
     }
 
@@ -2021,6 +2667,19 @@ const LIST_ROW_H: f32 = 40.0;
 const LIST_TOP: f32 = tokens::DECK_TOP + 8.0;
 const MAIL_ROWS: usize = LIST_ROWS;
 const PLUGIN_ROWS: usize = LIST_ROWS;
+/// Tako page on the large panel: a seven-key sidebar (tighter than Settings' four), and the
+/// section's content under its title: three list rows, or four lines on a 32 DIP rhythm.
+const TAKO_SECTION_PITCH: f32 = 24.0;
+const TAKO_SECTION_H: f32 = 22.0;
+const TAKO_CONTENT: f32 = SETTINGS_TOP + 22.0;
+const TAKO_LIST_ROWS: usize = 3;
+const TAKO_LINES: usize = 4;
+const TAKO_LINE_PITCH: f32 = 32.0;
+/// Bottom of the content on the large panel, in page coordinates.
+const LARGE_BOTTOM: f32 = tokens::DECK_BOTTOM + (View::PanelTall.size().1 - View::Panel.size().1) - PAD;
+const _: () = assert!(SETTINGS_TOP + 6.0 * TAKO_SECTION_PITCH + TAKO_SECTION_H / 2.0 <= LARGE_BOTTOM);
+const _: () = assert!(TAKO_CONTENT + TAKO_LIST_ROWS as f32 * LIST_ROW_H + 16.0 <= LARGE_BOTTOM);
+const _: () = assert!(TAKO_CONTENT + 16.0 + (TAKO_LINES as f32 - 0.5) * TAKO_LINE_PITCH <= LARGE_BOTTOM);
 /// One toggle tile on the Controls page: icon, name, state line, the fill while on, its click.
 type Tile = (char, String, String, Option<D2D1_COLOR_F>, Option<Hit>);
 
@@ -2072,13 +2731,26 @@ const _: () = assert!(LYRIC_TOP > tokens::DECK_TOP);
 const _: () = assert!(LYRIC_BOTTOM < tokens::DECK_BOTTOM);
 const _: () = assert!(LYRIC_BOTTOM - LYRIC_TOP > 2.0 * RADIUS_LYRIC);
 
+/// "3 in queue", or nothing for none.
+fn count(n: usize, what: &str) -> String {
+    if n == 0 { String::new() } else { format!("{n} {what}") }
+}
+
 /// Distance between theme swatches on the settings page.
 const SWATCH_PITCH: f32 = 28.0;
 
-/// Agent rows that fit in the panel; they use the shared list rows.
-const VISIBLE_AGENTS: usize = crate::feeds::agents::VISIBLE;
-const AGENT_ROW_H: f32 = LIST_ROW_H;
-const AGENT_TOP: f32 = LIST_TOP;
+/// Agents page: the limits column's width, a session row closed and open, the gap from the
+/// filter row to the list, and in the limits column the meter pitch, window name, and share.
+const AGENT_SIDE: f32 = 150.0;
+const AGENT_ROW: f32 = 40.0;
+const AGENT_ROW_OPEN: f32 = 74.0;
+const AGENT_LIST_GAP: f32 = 18.0;
+const AGENT_METER_PITCH: f32 = 16.0;
+const AGENT_WINDOW_W: f32 = 34.0;
+const AGENT_SHARE_W: f32 = 50.0;
+/// Plan meters turn amber, then red, as a window fills.
+const LIMIT_WARN: u8 = 75;
+const LIMIT_HIGH: u8 = 90;
 
 /// Dot color per agent state.
 fn agent_color(state: AgentState, accent: D2D1_COLOR_F, idle: D2D1_COLOR_F) -> D2D1_COLOR_F {
@@ -2088,6 +2760,38 @@ fn agent_color(state: AgentState, accent: D2D1_COLOR_F, idle: D2D1_COLOR_F) -> D
         AgentState::Done => accent,
         AgentState::Idle => idle,
     }
+}
+
+/// Meter tone: the accent while there is room, amber from `LIMIT_WARN`, red from `LIMIT_HIGH`.
+fn limit_color(used: u8, accent: D2D1_COLOR_F) -> D2D1_COLOR_F {
+    match used {
+        LIMIT_HIGH.. => RED,
+        LIMIT_WARN.. => ORANGE,
+        _ => accent,
+    }
+}
+
+/// Shortest Google client secret worth trying; real ones are about 35 characters.
+const GOOGLE_SECRET_MIN: usize = 10;
+
+/// A Google OAuth client id: a desktop client ends in this domain.
+fn google_id_ok(id: &str) -> bool {
+    let id = id.trim();
+    id.len() > ".apps.googleusercontent.com".len() && id.ends_with(".apps.googleusercontent.com")
+}
+
+/// A secret drawn as dots, one per character.
+fn mask(text: &str) -> String {
+    "•".repeat(text.chars().count())
+}
+
+/// Welcome choice cards: their top and height, under the title.
+const WELCOME_CARD_TOP: f32 = 44.0;
+const WELCOME_CARD_H: f32 = 50.0;
+
+/// Two letters for an agent's badge: "CL" for Claude, "OM" for omp.
+fn agent_tag(label: &str) -> String {
+    label.chars().filter(|c| c.is_alphanumeric()).take(2).collect::<String>().to_uppercase()
 }
 
 /// Status at the right of an agent row's top line: what state it is in, and since when.
@@ -2125,6 +2829,7 @@ fn page_icon(page: Page) -> Option<char> {
         Page::Agents => Some(ICON_TERMINAL),
         Page::Mail => Some(ICON_MAIL),
         Page::Plugins => Some(ICON_PLUGIN),
+        Page::Tako => Some(ICON_HEART),
         Page::Settings => Some(ICON_SETTINGS),
     }
 }
@@ -2152,6 +2857,7 @@ fn label(page: Page) -> &'static str {
         Page::Agents => "Agents",
         Page::Mail => "Mail",
         Page::Plugins => "Add-ons",
+        Page::Tako => "Tako",
         Page::Settings => "Settings",
     }
 }
