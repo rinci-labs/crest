@@ -176,6 +176,17 @@ impl App {
                 self.settings.tako_sounds = !self.settings.tako_sounds;
                 self.settings.save();
             }
+            Command::ToggleUpdates => {
+                self.settings.updates = !self.settings.updates;
+                self.settings.save();
+                self.check_updates();
+            }
+            Command::CheckUpdates => self.check_updates(),
+            Command::OpenRelease => {
+                if let Some(release) = &self.release {
+                    dnd::open_url(&release.url);
+                }
+            }
             Command::ToggleTakoMessages => {
                 self.settings.tako_messages = !self.settings.tako_messages;
                 self.settings.save();

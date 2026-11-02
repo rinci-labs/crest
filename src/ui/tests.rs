@@ -450,6 +450,7 @@ fn preview_states() {
     few_pages.set_shown(Page::System, false);
     few_pages.move_by(Page::Tasks, -1);
     let timer_done = Hud::Timer { minutes: 5 };
+    let update_hud = Hud::Update { version: "0.2.0".into(), url: "https://github.com/rinci-labs/crest/releases/tag/v0.2.0".into() };
     let used_up = vec![
         Limits {
             kind: AgentKind::Claude,
@@ -644,6 +645,8 @@ fn preview_states() {
         State::new("page_tako_empty", View::PanelTall, Page::Tako),
         State { hovered: Some(Hit::TakoKey), ..State::new("page_tako_setup", View::PanelTall, Page::Tako) },
         State::new("page_settings_tako", View::PanelTall, Page::Settings),
+        State::new("page_settings_about", View::PanelTall, Page::Settings),
+        State { hud: Some(&update_hud), ..State::new("hud_update", View::Card, Page::Home) },
         State { player: Some(&video), ..State::new("player_video_loading", View::Player, Page::Home) },
         State { player: Some(&video_ready), hovered: Some(Hit::PlayerClose), ..State::new("player_video", View::Player, Page::Home) },
         State { player: Some(&video), theme: Theme::Paper, ..State::new("player_video_paper", View::Player, Page::Home) },
@@ -764,8 +767,10 @@ fn preview_states() {
             player: state.player,
             agent_scroll: 0,
             welcome: state.welcome,
-            settings: Settings::default(),
+            settings: if state.name.ends_with("_about") { Settings { updates: true, ..Settings::default() } } else { Settings::default() },
             settings_section: settings_section(state.name),
+            release: state.name.ends_with("_about").then_some("0.2.0"),
+            update_checking: false,
         };
         renderer.draw(&scene).unwrap();
         let _ = unsafe { GdiFlush() };
@@ -845,6 +850,8 @@ fn scene_for<'a>(data: &'a Sample, view: View, page: Page, media: bool) -> Scene
         welcome: false,
         settings: Settings::default(),
         settings_section: SettingsSection::default(),
+        release: None,
+        update_checking: false,
     }
 }
 
@@ -1337,6 +1344,7 @@ fn prayer_and_settings_fit_their_panels() {
     let deck = tokens::DECK_BOTTOM + height - View::Panel.size().1 + tokens::CONTENT_SHIFT;
     let last = [
         (SettingsSection::Look, Hit::Command(Command::ToggleCompactHud)),
+        (SettingsSection::About, Hit::Command(Command::ToggleUpdates)),
         (SettingsSection::Features, Hit::Command(Command::ToggleScreenshots)),
         (SettingsSection::Prayer, Hit::Command(Command::PrayerLead(30))),
         (SettingsSection::Agents, Hit::AgentHook(crate::feeds::agents::Provider::Copilot)),

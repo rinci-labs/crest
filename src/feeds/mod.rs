@@ -8,4 +8,5 @@ pub mod media;
 pub mod messages;
 pub mod plugins;
 pub mod tako;
+pub mod updates;
 pub mod weather;

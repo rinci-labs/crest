@@ -10,6 +10,7 @@ dependencies = [
  "windows-collections",
  "windows-core",
  "windows-future",
+ "windows-link",
  "windows-numerics",
 ]
 

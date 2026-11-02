@@ -40,6 +40,11 @@ pub(super) const TIMER_CALENDARS: usize = 17;
 pub(super) const TIMER_GOOGLE: usize = 19;
 /// The Tako player looks for its Edge window and keeps it docked.
 pub(super) const TIMER_PLAYER: usize = 20;
+/// The opt-in update check runs again a day later.
+pub(super) const TIMER_UPDATES: usize = 21;
+pub(super) const UPDATE_EVERY_MS: u32 = 24 * 60 * 60 * 1_000;
+/// A new release: long enough to read, it waits in Settings > About afterwards.
+pub(super) const UPDATE_HUD_MS: u32 = 8_000;
 pub(super) const WELCOME_DELAY_MS: u32 = 1_300;
 /// Result of the Administrator step for messages (see `identity`): 0 success, 1 failure,
 /// 2 Administrator permission denied.
