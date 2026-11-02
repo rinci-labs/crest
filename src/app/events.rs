@@ -311,6 +311,7 @@ impl App {
 
     /// Start/stop folder watchers according to settings.
     pub(super) fn update_watchers(&mut self) {
+        self.watch_clipboard();
         let shots = self.settings.screenshots && self.settings.pages.shown(Page::Shelf);
         if shots != self.screenshots.is_some() {
             self.screenshots = shots.then(|| Watch::start(watch::Kind::Screenshot, self.services.notifier())).flatten();

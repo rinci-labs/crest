@@ -3,6 +3,7 @@
 
 pub mod agenda;
 pub mod calfeed;
+pub mod clipboard;
 pub mod feeds;
 pub mod focus;
 pub mod prayer;
@@ -19,6 +20,8 @@ pub enum Page {
     /// Volume, brightness, microphone, mute, and weather city.
     Controls,
     Shelf,
+    /// Texts copied lately, to copy again.
+    Clipboard,
     Focus,
     Timer,
     Water,
@@ -41,10 +44,11 @@ pub enum Page {
 }
 
 impl Page {
-    pub const ALL: [Page; 13] = [
+    pub const ALL: [Page; 14] = [
         Page::Home,
         Page::Controls,
         Page::Shelf,
+        Page::Clipboard,
         Page::Focus,
         Page::Timer,
         Page::Water,
@@ -63,6 +67,7 @@ impl Page {
             Page::Home => "Home",
             Page::Controls => "Controls",
             Page::Shelf => "Shelf",
+            Page::Clipboard => "Clipboard",
             Page::Focus => "Focus",
             Page::Timer => "Timer",
             Page::Water => "Water",
@@ -83,6 +88,7 @@ impl Page {
             Page::Home => "home",
             Page::Controls => "controls",
             Page::Shelf => "shelf",
+            Page::Clipboard => "clipboard",
             Page::Focus => "focus",
             Page::Timer => "timer",
             Page::Water => "water",
@@ -101,7 +107,7 @@ impl Page {
 /// Page order and which pages are hidden. Home is always shown.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Pages {
-    order: [Page; 13],
+    order: [Page; 14],
     /// One bit per page, in [`Page::ALL`] order.
     hidden: u16,
     /// Pages whose feature is switched off (Mail, Plugins, Tako): kept off the tab bar so it only
@@ -118,7 +124,7 @@ impl Default for Pages {
 
 impl Pages {
     /// All pages in the user's order, including hidden ones.
-    pub fn order(&self) -> [Page; 13] {
+    pub fn order(&self) -> [Page; 14] {
         self.order
     }
 
@@ -241,7 +247,7 @@ mod tests {
         let pages = Pages::default();
         assert_eq!(pages.step(Page::Home, -1), Page::Tako);
         assert_eq!(pages.step(Page::Tako, 1), Page::Home);
-        assert_eq!(pages.step(Page::Shelf, 1), Page::Focus);
+        assert_eq!(pages.step(Page::Shelf, 1), Page::Clipboard);
     }
 
     #[test]
@@ -252,7 +258,7 @@ mod tests {
         assert!(pages.shown(Page::Home), "home is always shown");
         assert_eq!(pages.step(Page::Timer, 1), Page::Prayer, "Timer steps on from its shared tab");
         assert_eq!(pages.tab(Page::Timer), Page::Focus);
-        assert_eq!(pages.visible().count(), 11);
+        assert_eq!(pages.visible().count(), 12);
 
         pages.move_by(Page::System, -1);
         assert_eq!(
@@ -261,6 +267,7 @@ mod tests {
                 Page::Home,
                 Page::Controls,
                 Page::Shelf,
+                Page::Clipboard,
                 Page::Focus,
                 Page::Prayer,
                 Page::System,
@@ -276,15 +283,15 @@ mod tests {
         assert!(pages.can_move(Page::Tasks, 1), "tasks still has a neighbour on the right");
 
         assert_eq!(Pages::parse(&pages.to_text()), pages);
-        assert_eq!(pages.to_text(), "home,controls,shelf,focus,timer,-water,prayer,system,tasks,agents,mail,plugins,tako");
+        assert_eq!(pages.to_text(), "home,controls,shelf,clipboard,focus,timer,-water,prayer,system,tasks,agents,mail,plugins,tako");
         // Unknown names are skipped; pages not mentioned are appended at the end.
         let partial = Pages::parse("tasks, junk, -shelf");
         assert_eq!(partial.order()[0], Page::Tasks);
         assert!(!partial.shown(Page::Shelf));
-        assert_eq!(partial.visible().count(), 11);
+        assert_eq!(partial.visible().count(), 12);
         // Older settings (from before newer pages existed) still parse; new pages show at the end.
         let old = Pages::parse("home,shelf,focus,water,tasks,system");
-        assert_eq!(old.order()[6..], [Page::Controls, Page::Timer, Page::Prayer, Page::Agents, Page::Mail, Page::Plugins, Page::Tako]);
+        assert_eq!(old.order()[6..], [Page::Controls, Page::Clipboard, Page::Timer, Page::Prayer, Page::Agents, Page::Mail, Page::Plugins, Page::Tako]);
         assert!(old.shown(Page::Timer));
         // With Focus hidden, Timer gets a tab of its own again.
         let mut alone = Pages::default();

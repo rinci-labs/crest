@@ -11,7 +11,7 @@ use windows::Win32::Graphics::Dwm::DwmFlush;
 use windows::Win32::Graphics::Gdi::{
     GetMonitorInfoW, HMONITOR, MONITOR_DEFAULTTOPRIMARY, MONITORINFO, MonitorFromPoint,
 };
-use windows::Win32::System::DataExchange::{CloseClipboard, GetClipboardData, OpenClipboard};
+use windows::Win32::System::DataExchange::{CloseClipboard, GetClipboardData, OpenClipboard, RemoveClipboardFormatListener};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Memory::{GlobalLock, GlobalUnlock};
 use windows::Win32::System::Ole::CF_UNICODETEXT;
@@ -40,7 +40,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     RI_KEY_BREAK, WA_INACTIVE, WM_ACTIVATE, WM_APP, WM_CHAR, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_INPUT,
     WM_LBUTTONDBLCLK, WM_WTSSESSION_CHANGE, WTS_SESSION_LOCK, WTS_SESSION_UNLOCK,
     WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEHWHEEL, WM_MOUSEMOVE, WM_MOUSEWHEEL,
-    WM_POWERBROADCAST, WM_QUIT, WM_RBUTTONUP, WM_SETCURSOR, WM_TIMECHANGE, WM_TIMER, WNDCLASSEXW,
+    WM_CLIPBOARDUPDATE, WM_POWERBROADCAST, WM_QUIT, WM_RBUTTONUP, WM_SETCURSOR, WM_TIMECHANGE, WM_TIMER, WNDCLASSEXW,
     WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 use windows::core::{Error, PCWSTR, Result, w};
@@ -69,6 +69,7 @@ use crate::system::stats::Stats;
 use crate::shell::tray::{self, Command, MenuState, PageCommand, PageMenu, Tray};
 use crate::tools::Page;
 use crate::tools::focus::{self, Focus};
+use crate::tools::clipboard::Clips;
 use crate::tools::shelf::{self, Shelf};
 use crate::tools::tasks::{self, Tasks};
 use crate::tools::agenda::{self, Agenda, Date};
@@ -79,6 +80,7 @@ use crate::tools::water::{GOAL_ML, Water};
 use crate::feeds::weather::{self, City, Weather};
 use crate::{shell::autostart, system::clock};
 
+mod clipboard;
 mod config;
 mod clock_text;
 mod commands;
@@ -265,6 +267,10 @@ struct App {
     plugged: Option<bool>,
     battery: Option<u32>,
     shelf: Shelf,
+    /// Texts copied lately (memory only).
+    clips: Clips,
+    /// The window is registered for `WM_CLIPBOARDUPDATE`.
+    clipboard_watched: bool,
     focus: Focus,
     water: Water,
     tasks: Tasks,
@@ -503,6 +509,8 @@ impl App {
             plugged: None,
             battery: None,
             shelf: Shelf::load(),
+            clips: Clips::default(),
+            clipboard_watched: false,
             focus: Focus::default(),
             water: Water::load(),
             tasks: Tasks::load(),
@@ -698,6 +706,7 @@ impl App {
                 self.refresh_mode(true);
             }
             WM_TIMECHANGE => self.on_clock(),
+            WM_CLIPBOARDUPDATE => self.on_clipboard_update(),
             WM_POWERBROADCAST => return self.on_power_broadcast(wparam, lparam),
             m if m == self.taskbar_created => self.tray.add(),
             m if m == self.quit_message => unsafe { PostQuitMessage(0) },
@@ -715,6 +724,9 @@ impl Drop for App {
         unsafe {
             let _ = WTSUnRegisterSessionNotification(self.hwnd);
             let _ = UnregisterHotKey(Some(self.hwnd), HOTKEY_ID);
+            if self.clipboard_watched {
+                let _ = RemoveClipboardFormatListener(self.hwnd);
+            }
         }
     }
 }
@@ -755,7 +767,16 @@ fn lock_key_states() -> (bool, bool) {
 fn clipboard_text() -> Option<String> {
     unsafe {
         OpenClipboard(None).ok()?;
-        let text = GetClipboardData(CF_UNICODETEXT.0 as u32).ok().and_then(|handle| {
+        let text = unicode_text();
+        let _ = CloseClipboard();
+        text
+    }
+}
+
+/// The clipboard's text. The clipboard must be open.
+unsafe fn unicode_text() -> Option<String> {
+    unsafe {
+        GetClipboardData(CF_UNICODETEXT.0 as u32).ok().and_then(|handle| {
             let memory = HGLOBAL(handle.0);
             let ptr = GlobalLock(memory) as *const u16;
             if ptr.is_null() {
@@ -768,9 +789,7 @@ fn clipboard_text() -> Option<String> {
             let text = String::from_utf16_lossy(std::slice::from_raw_parts(ptr, len));
             let _ = GlobalUnlock(memory);
             Some(text)
-        });
-        let _ = CloseClipboard();
-        text
+        })
     }
 }
 
