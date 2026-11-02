@@ -103,6 +103,7 @@ pub enum Command {
     /// Which Tako donations become notices, and whether they show the message.
     ToggleTakoAlerts,
     ToggleTakoSounds,
+    ToggleTakoAutoplay,
     ToggleTakoMessages,
     /// Start the browser sign-in for Google.
     GoogleConnect,

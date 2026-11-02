@@ -143,7 +143,7 @@ impl App {
         // changes, and occasionally so the clock and focus ring stay current.
         let pill = matches!(self.view, View::Pill | View::LyricPill);
         let lyric_moved = self.view == View::LyricPill && self.lyric_line().map(|(i, _)| i) != Some(self.lyric_shown);
-        if pill && self.playing() && settled && !lyric_moved && self.now() - self.last_full < 5.0 {
+        if pill && (self.playing() || self.player_minimized()) && settled && !lyric_moved && self.now() - self.last_full < 5.0 {
             let accent = self.media.as_ref().and_then(|m| m.art.as_ref()).and_then(|art| art.accent);
             let result = self
                 .renderer

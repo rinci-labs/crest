@@ -20,8 +20,15 @@ and versions follow [Semantic Versioning](https://semver.org).
   VIP queue. Settings → Tako picks which donations notify and whether messages show. Read-only
   (OBS still plays everything), off by default, and the key is DPAPI-encrypted.
 - Media shares and song requests play inside the island: it grows into a 16:9 player with the
-  sender, Browser, and Close, and the video (Microsoft Edge in app mode, InPrivate, video only,
-  starting at once) is docked into it. YouTube, TikTok, and Instagram links only.
+  sender, Minimize, Browser, and Close, and the video (WebView2, video only, starting at once)
+  is docked into it. YouTube, TikTok, and Instagram links only.
+- Autoplay (Settings → Tako): new media shares and song requests play as they arrive, or queue
+  up and play in turn while one is playing. Minimize keeps the video playing behind the pill.
+- Song requests play as sound only, in a compact song card: title, artist and sender, time
+  played and length, and a progress bar, with Video to see it after all. Videos start with sound,
+  TikTok's too.
+- A video the platform will not play is skipped at once with a "Can't play here" notice and an
+  Open button; a finished video closes the player.
 - Agents page shows plan usage limits: each window (5 hours, week) as a small bar with its
   share, amber from 75% and red from 90%, and the time until it resets when one is used up or on hover.
   Codex is read from its rollout files; Claude Code through the opt-in `crest.exe --statusline`
@@ -75,6 +82,8 @@ and versions follow [Semantic Versioning](https://semver.org).
 
 ### Fixed
 
+- YouTube videos in the player no longer fail with "This video is unavailable": the local page
+  is served as `localhost`, since YouTube refuses its embed on any page from an IP address.
 - Showing or hiding the Mail or Plugins page from the tray's Pages menu changed the size instead:
   their menu ids overlapped the Size menu's.
 - Mail rows no longer overlap, and only the row under the cursor lights up.

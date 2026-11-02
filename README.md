@@ -128,10 +128,11 @@ Both live under `%APPDATA%\Crest` and each has an entry in the tray menu:
   leaderboard, milestone, song queue, poll, timer, and VIP queue from tako.id and listens on Tako's realtime relay
   (relay.tako.id), as the browser source in OBS does. It never marks a donation as played. The
   overlay key is encrypted with DPAPI in `tako.txt` and never logged; donations are kept in
-  memory only. Media shares and songs play in an InPrivate Microsoft Edge app window, so the
-  video page sees none of your cookies or logins and keeps nothing; only YouTube, TikTok, and
-  Instagram links are opened. To show the video alone, Crest serves the one page holding the
-  platform's embed from `127.0.0.1` for a minute.
+  memory only. Media shares and songs play in WebView2 inside the island, with a profile of its
+  own that is wiped before each video, so the video page sees none of your cookies or logins;
+  only YouTube, TikTok, and Instagram links are opened, and the page cannot navigate anywhere
+  else. To show the video alone, Crest serves the one page holding the platform's embed from
+  `http://localhost` (loopback only) for a minute.
 - **Check for updates** (Settings > About): once a day Crest asks GitHub for the latest release
   of Crest, so GitHub sees this PC's IP address and Crest's version. A newer version shows one
   notice whose button opens the release page; Crest never downloads or runs anything itself.

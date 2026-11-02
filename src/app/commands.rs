@@ -176,6 +176,13 @@ impl App {
                 self.settings.tako_sounds = !self.settings.tako_sounds;
                 self.settings.save();
             }
+            Command::ToggleTakoAutoplay => {
+                self.settings.tako_autoplay = !self.settings.tako_autoplay;
+                self.settings.save();
+                if !self.settings.tako_autoplay {
+                    self.tako.queue.clear();
+                }
+            }
             Command::ToggleUpdates => {
                 self.settings.updates = !self.settings.updates;
                 self.settings.save();

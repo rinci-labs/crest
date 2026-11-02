@@ -461,24 +461,47 @@ page's data. Off by default; turned on in Settings → Features or Settings → 
   the name, the amount (or "10× Mawar" for a gift unit), and one line: the message, "▶ YouTube ·
   title" for a media share, or "Played “sound”" for the soundboard. A media share notice plays
   its video; other notices open the page. Media that Tako's filter flagged is never offered.
-- **Player:** `src/system/player.rs` plays a video or song in Microsoft Edge's app mode (no
-  address bar; the same engine WebView2 embeds) inside the island: the shape grows into
-  `View::Player` (600 DIP wide, a 16:9 slot under a row with the sender, the video line, and
-  Browser and Close buttons), and Edge's frameless window is docked over the slot with the
-  slot's corner radius once the spring has settled. While the shape moves, fades, or Crest is
-  hidden, the window is hidden. Until it appears, the slot shows three pulsing dots over
-  "Loading video…"; while it plays, the row's play glyph becomes the music wave. The app polls
-  every 200 ms to find, dock, and notice the window closing; Edge that shows nothing in 15 s
-  gives way to the default browser. Hovering the player does not open the panel. Crest's layered window
-  cannot host a web view and the `windows` crate has no WebView2 bindings, so the player is
-  Edge's own sandboxed process. Only `https` links to YouTube, TikTok, or Instagram are accepted.
-  The video plays alone and starts at once: YouTube refuses its embed on a page with no site
-  behind it (error 153), so Crest serves the one page holding the platform's embed from
-  `127.0.0.1`, on a random port and path, for one minute, with a CSP that allows only those
-  platforms' frames; the embed is rebuilt from the video id alone. The window is InPrivate in
-  the user's own Edge, with no other switches: a separate profile folder would be signed into
-  the Windows account and synced (passwords, extensions) by Edge even for InPrivate, so none is
-  made. Without Edge, an allowed link opens in the default browser; any other link is ignored. Queue ids and the
+- **Player:** `src/system/player.rs` plays a video or song in WebView2 (the Edge engine built
+  into Windows) inside the island: the shape grows into `View::Player` (600 DIP wide, a 16:9
+  slot under a row with the sender, the video line, and Minimize, Browser, and Close buttons),
+  and a frameless black tool window of Crest's own, holding the browser, is docked over the slot
+  with the slot's corner radius once the spring has settled. While the shape moves, fades, or
+  Crest is hidden, that window is moved beyond the leftmost screen rather than hidden: a hidden
+  window counts as a page nobody sees, and the browser would not start its video. Until the browser is up, the slot shows three pulsing
+  dots over "Loading video…"; while it plays, the row's play glyph becomes the music wave.
+  Minimize turns the island back into the pill with the music wave on its right while the video
+  plays on unseen; a click on the pill brings it back. A song share plays as sound only in
+  `View::Song` (420 × 84 DIP): the title with Video, Minimize, and Close; the artist and sender
+  with "1:02 / 2:41"; and a progress bar. Video turns it into the player. The app polls every
+  200 ms to dock the window and read the page's title: `playing <seconds> <length> <muted>`
+  (or `paused …`), `ended`, or `error`, from YouTube's player API and TikTok's `postMessage`
+  events; Instagram reports nothing. Videos start with sound (Chromium's autoplay policy is
+  relaxed for this browser only, as OBS's browser source does); TikTok's player starts muted
+  and is unmuted once. An ended
+  video closes; one the platform will not play (embedding off, removed, private) is skipped at
+  once with a "Can't play here" notice whose Open button opens it in the browser. A browser
+  that is not up in 15 s, or stops working, gives way to the default browser. Hovering the
+  player does not open the panel. Crest's layered window cannot host a web view, and the
+  `windows` crate has no WebView2 bindings, so `src/system/webview.rs` declares the few
+  interfaces used (ids and method order from Microsoft's `WebView2.h`) and starts the
+  installed Evergreen runtime the way Microsoft's loader does, through its
+  `CreateWebViewEnvironmentWithOptionsInternal` export. Only `https` links to YouTube, TikTok,
+  or Instagram are accepted, and the embed is rebuilt from the video id alone. YouTube refuses
+  its embed on a page from an IP address (error 150, tested with `127.0.0.1` and a LAN address)
+  and on a page with no site (error 153), so Crest serves the one page holding the embed at
+  `http://localhost`, bound to `127.0.0.1` only, on a random port and path, for one minute,
+  with a CSP that allows only those platforms' frames. The browser cannot leave that page (other
+  top-level navigations are cancelled), new windows open nothing but an accepted video link in
+  the default browser, and dev tools, context menus, script dialogs, host objects, and web
+  messages are off. Each video gets a new, empty profile under `%LOCALAPPDATA%\Crest\Player`
+  (earlier ones are deleted), never signed in with the Windows account; a profile per video also
+  keeps a new video from waiting on the last one's browser to exit. Without WebView2, an allowed link opens in
+  the default browser; any other link is ignored.
+- **Autoplay:** with "Autoplay videos" on (Settings → Tako, on by default), a new media share
+  (not flagged by Tako) or a new song request plays as it arrives if the player is free, and
+  otherwise waits in a queue of up to 20 that plays in order as each video ends, is skipped,
+  or is closed. The first song list after connecting is taken as already known, so an old
+  backlog does not start playing. The lock screen holds the queue until unlock. Queue ids and the
   shared-data token that go back to Tako in request headers are checked first (a uuid, a short
   base64url token), so a reply cannot inject a header.
 - **Layout:** on the large panel (`View::PanelTall`, like Settings), a sidebar of seven sections

@@ -19,3 +19,4 @@ pub mod sound;
 pub mod stats;
 pub mod thumbnail;
 pub mod watch;
+pub mod webview;
